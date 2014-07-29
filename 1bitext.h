@@ -100,7 +100,7 @@ protected:
 	long double mu;
 	long double r;
 	void *global_rand;
-	bitfield<uint64_t, uint64_t> b;
+	bitfield<uint64_t, uint64_t> b;	// Input Data der Länge n
 	R_interp *r_interp;
 };
 

@@ -57,10 +57,17 @@ using namespace std;
 // why we keep the code around.
 
 bitext_rsh::~bitext_rsh() {
-	if (global_rand != nullptr) {
-		for (auto bignum : coeffs)
-			BN_free(bignum);
-	}
+	#ifdef USE_CUDA
+		if(irred_poly)
+			delete [] irred_poly;
+		if(coeffs)
+			delete [] coeffs;
+	#else
+		if (global_rand != nullptr) {
+			for (auto bignum : coeffs)
+				BN_free(bignum);
+		}
+	#endif
 }
 
 vertex_t bitext_rsh::num_random_bits() {
@@ -73,16 +80,25 @@ vertex_t bitext_rsh::num_random_bits() {
 	return 2*l_rounded;
 }
 
+/*
+	Berechnet die Entropy
+*/
 uint64_t bitext_rsh::compute_k() {
 	// Caveat: r can mean the polynomial order and the overlap in this context.
 	return(static_cast<uint64_t>(bitext::r*pp.m + 4*log2(1.0/pp.eps) + 6));
 }
 
+/* 
+	Berechnet die vom Extraktor benötigte Seedlänge l und den Grad
+	des zu erzeugenden Polynoms r
+*/
 void bitext_rsh::compute_r_l() {
 	l = ceil(log2((long double)pp.n) + 2*log2(2/pp.eps));
 	r = ceil(pp.n/l);
 
 	uint64_t l_rounded = l + (8-l%8); // See comment in num_random_bits
+	// l_rounded ist schon die Hälfte, da durch num_random_bits ja 2*l 
+	// gefordert wurde, dadurch ist l_rouded/8 = chars_per_half
 	chars_per_half = l_rounded/BITS_PER_TYPE(char);
 
 	if (debug_level >= RESULTS) {
@@ -93,25 +109,33 @@ void bitext_rsh::compute_r_l() {
 		     << chars_per_half << "(l_rounded=" << l_rounded << ")" << endl;
 	}
 
-	set_irrep(irred_poly, l);
-#ifdef USE_NTL
-	GF2E::init(irred_poly);
-#endif
+	#ifdef USE_CUDA
+		if(irred_poly)
+			delete [] irred_poly;
+		irred_poly = new sfixn[(l-1)/SIZE_CHUNK+1];
+		set_irrep_cuda(irred_poly, l);
+	#else
+		set_irrep(irred_poly, l);
+	#endif
 	
-	if (debug_level >= INFO) {
-#ifdef USE_NTL
-		cerr << "Picked rsh bit extractor irreducible polynomial "
-		     << irred_poly << endl;
-#else
-		cerr << "Picked rsh bit extractor irreducible polynomial ";
-		for (auto i : irred_poly)
-			cerr << i << " ";
-		cerr << endl;
-#endif
+	#ifdef USE_NTL
+		GF2E::init(irred_poly);
+	#endif
+		
+		if (debug_level >= INFO) {
+	#ifdef USE_NTL
+			cerr << "Picked rsh bit extractor irreducible polynomial "
+			     << irred_poly << endl;
+	#elif !defined USE_CUDA
+			cerr << "Picked rsh bit extractor irreducible polynomial ";
+			for (auto i : irred_poly)
+				cerr << i << " ";
+			cerr << endl;
+	#endif
 	}
 }
 
-#ifndef USE_NTL
+#if !defined USE_NTL && !defined USE_CUDA
 // Horner's rule for polynomial evaluation, using GF(2^n) arithmetic
 // This is nearly c&p from weakdes_gf2p, but providing a unified
 // version via templates would require another layer of indirection for
@@ -148,22 +172,31 @@ void bitext_rsh::create_coefficients() {
 		exit(-1);
 	}
 
+	// wird eigentlich schon in set_input_data erledigt
 	b.set_raw_data(global_rand, pp.n);
 	
 	// TODO: Some padding may need to be required
+	// Berechnet die Anzahl der Blöcke pro Koeffizient
+	// Bsp: Wenn l = 14 und Größe von chung_t = 3, so werden 5 Elemente benötigt
 	uint64_t elems_per_coeff = ceil(l/(long double)BITS_PER_TYPE(chunk_t));
 	vector<chunk_t> vec(elems_per_coeff);
 
-#ifndef USE_NTL
+#if !defined USE_NTL && !defined USE_CUDA
 	coeffs.resize(r);
 #endif
-	for (uint64_t i = 0; i < r; i++) {
+	for (uint64_t i = 0; i < r; i++) { // Iteration über alle Koeffizienten
+
+		// Hole jeweils l Bits aus b und speichere sie in vec an der Stelle 0
+		// Merke: b ist der der Eingabezufallsstring
 		b.get_bit_range(i*l, (i+1)*l-1, &vec[0]);
 
 		// TODO: In the paper, coefficient i is for the exponent r-i. This
 		// is not what we do. Why are the values mingled this way? Since we
 		// are creating the coefficients from randomness, their relative order
 		// should not matter because the numerical values are, well, random...
+
+		// Das einzige was hier gemacht wird ist in jeder Iteration den Wert von
+		// vec in coeffs[i] als BigNumber zu speichern
 #ifdef USE_NTL
 		GF2Es val;
 		val.setValue(vec);
@@ -193,15 +226,18 @@ bool bitext_rsh::extract(void *inital_rand) {
 #ifdef USE_NTL
 	GF2Es val;
 	// Assign l bits to val, the parameter for the polynomial
-	GF2XFromBytes(val.LoopHole(), global_rand, chars_per_half);
+	GF2XFromBytes(val.LoopHole(), inital_rand, chars_per_half);
 
 	// ... and evaluate the polynomial
 	GF2E rs_res;
 	eval(rs_res, poly, val); // rs_res = poly(val)
+#elif USE_CUDA
+	sfixn  x[chars_per_half*SIZE_CHUNK/SIZE_BYTE];
+	BIGNUM *rs_res = BN_new();
 #else
 	BIGNUM *val = BN_new();
 	BIGNUM *rs_res = BN_new();
-	BN_bin2bn(reinterpret_cast<unsigned char*>(global_rand), chars_per_half, val);
+	BN_bin2bn(reinterpret_cast<unsigned char*>(inital_rand), chars_per_half, val);
 
 	rs_res = horner_poly_gf2n(val);
 	BN_free(val);
@@ -220,11 +256,14 @@ bool bitext_rsh::extract(void *inital_rand) {
 	data_len = rs_res->dmax;
 #endif
 
+	// pointer vom Typ data_t, der auf den Anfang der zweiten Hälfte 
+	// des Seeds zeigt
 	data_t *seed_half = reinterpret_cast<data_t*>(
 		reinterpret_cast<unsigned char*>(global_rand) + chars_per_half);
 	bool parity = 0;
 	unsigned short bitcnt;
 	for (idx_t count = 0; count < data_len; count++) {
+		// data wird mit zweiter Seedhälfte undiert
 		*(data+count) &= *(seed_half + count);
 		// If an even number of bits is set in the current subset,
 		// the global parity is XORed with one.
@@ -233,6 +272,7 @@ bool bitext_rsh::extract(void *inital_rand) {
 #ifdef HAVE_SSE4
 		bitcnt = _mm_popcnt_u64(*(data+count));
 #else
+		// Gibt die Anzahl der Einsen zurück
 		bitcnt = __builtin_popcountll(*(data+count));
 #endif
 		// Check if the bitcount is divisible by two (without using

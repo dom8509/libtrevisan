@@ -9,6 +9,9 @@ OPTIMISE=-O3
 HAVE_SSE4=y
 HAVE_GF2X=n
 
+USE_NTL=n
+USE_CUDA=y
+
 ###### Nothing user-configurable below here ########
 .PHONY: all clean paper src-pdf figures notes
 all: extractor
@@ -18,7 +21,7 @@ WDS = weakdes_gf2x.o weakdes_gfp.o weakdes_aot.o weakdes_block.o
 objects = ${BITEXTS} ${WDS} timing.o primitives.o ossl_locking.o \
 	  blockdes_params.o R_interp.o
 # Objects with a separate make target
-objects.ext = generated/irreps_ntl.o generated/irreps_ossl.o
+objects.ext = generated/irreps_ntl.o generated/irreps_cuda.o generated/irreps_ossl.o
 
 all.objects = $(objects) $(objects.ext) $(objects.r)
 # TODO: We should really let gcc figure out that list so that
@@ -27,8 +30,9 @@ headers = 1bitext.h debug.h timing.h weakdes_gf2x.h weakdes_gfp.h weakdes_block.
 	  utils.hpp weakdes.h bitfield.hpp
 platform=$(shell uname)
 INCDIRS=-I/opt/local/include
-INCDIRS+=-I/Users/wolfgang/src/openssl-1.0.1c/include
-LIBDIRS=-L/opt/local/lib
+# INCDIRS+=-I/Users/wolfgang/src/openssl-1.0.1c/include
+INCDIRS+=-I/usr/local/lib/R/site-library/RInside/include -I/usr/local/lib/R/site-library/Rcpp/include -I/usr/share/R/include -I/usr/local/include
+LIBDIRS=-L/opt/local/lib -L/usr/local/lib
 CXXFLAGS=$(OPTIMISE) $(OPENMP) $(DEBUG) $(VARIANTS) $(INCDIRS)
 ifeq ($(HAVE_SSE4),y)
 CXXFLAGS+=-msse4.2 -DHAVE_SSE4
@@ -45,6 +49,15 @@ LIBS+=-lrt -lntl
 else
 CXXFLAGS+=-std=c++11
 CXX=g++-mp-4.7
+endif
+
+ifeq ($(USE),y)
+CXXFLAGS+=-DUSE_NTL
+else ifeq ($(USE_CUDA),y)
+LIBS+=-l:cuda/libtrevisancuda.a
+CXXFLAGS+=-DUSE_CUDA -DLINUXINTEL64
+else
+CXXFLAGS+=-DUSE_OSSL
 endif
 
 # Cache the flags derived from R because they do not change across make invocations
@@ -67,12 +80,14 @@ $(objects): %.o: %.cc %.h .rcxxflags generated/bd_r_embedd.inc \
 	$(CXX) -c $(CXXFLAGS) $(shell cat .rcxxflags) $< -o $@
 
 gen_irreps: gen_irreps.cc
-	$(CXX) gen_irreps.cc -o gen_irreps -lntl -lgf2x
+	$(CXX) $(LIBDIRS) gen_irreps.cc -o gen_irreps -lntl -lgf2x -lgmp
 
-generated/irreps_ntl.o generated/irreps_ossl.o: gen_irreps
+generated/irreps_ntl.o generated/irreps_ossl.o generated/irreps_cuda.o: gen_irreps
 	./gen_irreps OSSL > generated/irreps_ossl.cc
 	$(CXX) generated/irreps_ossl.cc -c -o generated/irreps_ossl.o
-	./gen_irreps > generated/irreps_ntl.cc
+	./gen_irreps CUDA > generated/irreps_cuda.cc
+	$(CXX) generated/irreps_cuda.cc -DLINUXINTEL64 -c -o generated/irreps_cuda.o
+	./gen_irreps NTL > generated/irreps_ntl.cc
 	$(CXX) generated/irreps_ntl.cc -c -o generated/irreps_ntl.o
 
 generated/bd_r_embedd.inc: blockdes.r

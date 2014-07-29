@@ -33,11 +33,26 @@
 NTL_CLIENT
 #endif
 
+#ifdef USE_CUDA
+#include "cuda/libtrevisancuda.h"
+#endif
+
 class bitext_rsh : public bitext {
 public:
-	bitext_rsh(R_interp *r_interp) : bitext(r_interp) { };
+	bitext_rsh(R_interp *r_interp) : bitext(r_interp) { 
+		#ifdef USE_CUDA
+			irred_poly = NULL;
+			coeffs = NULL;
+		#endif
+	};
 	~bitext_rsh();
 
+	/*
+		Parameter:
+			global_rand: Zufallszahlenvektor, der als Basis zur Extraktion
+						 dient, dh. aus dme die ZZ extrahiert werden.
+			pp:			 Zusätzliche Parameter
+	*/
 	void set_input_data(void *global_rand, struct phys_params &pp) override {
 		bitext::set_input_data(global_rand, pp);
 		compute_r_l();
@@ -58,9 +73,9 @@ private:
 	void create_coefficients();
 	void compute_r_l();
 
-	uint64_t r;      // Order of polynomial, see the paper for details
-	uint64_t l;      // Seed length parameter, see the paper for details
-	uint64_t chars_per_half; // Number of char instances in half of the intial randomness
+	uint64_t r;   //=deg   // Order of polynomial, see the paper for details
+	uint64_t l;   //=t     // Seed length parameter, see the paper for details
+	uint64_t chars_per_half; // Number of char instances in half of the intiamodular reductionrandomness
 
 	typedef uint64_t idx_t; // Index type for the bit field
 
@@ -69,6 +84,13 @@ private:
 	GF2X irred_poly;
 	typedef _ntl_ulong chunk_t; // Chunk type for the bitfield
 	typedef _ntl_ulong data_t;  // Internal library type to store GF2m elements
+#elif USE_CUDA	
+	sfixn* coeffs;
+	sfixn* irred_poly; // The irrep is either a trinomial or pentanomial
+
+	// TODO: Determine if smaller index types cause any significant speedup
+	typedef uint64_t chunk_t;
+	typedef BN_ULONG data_t;
 #else
 	std::vector<BIGNUM*> coeffs;
 	int irred_poly[5]; // The irrep is either a trinomial or pentanomial

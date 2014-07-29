@@ -37,6 +37,10 @@ void debug_msg(int level, const char *fmt, ...) { }
 
 using namespace std;
 
+// Berechnung der Parameter für den LU Extractor
+// w = Bestimmt random walk
+// c = Grad des Polynoms 
+// l = Seedlänge um ein Bit zu extrahieren
 void bitext_expander::infer_params() {
 	SEXP ans;
 	stringstream call;
@@ -226,10 +230,13 @@ vertex_t bitext_expander::num_random_bits() {
 	// zeta aligned by byte
 	vertex_t count;
 	
+	// Anzahl der Knoten
 	count = multiple_of(numbits<vertex_t>(pp.n),
 			    BITS_PER_TYPE(edge_datum_t));
+	// Anzahl der Kantenübergänge
 	count += multiple_of(c*(l-1)*bits_per_edge,
 			     BITS_PER_TYPE(edge_datum_t));
+	// Anzahl der Entscheidungen
 	count += multiple_of(l, BITS_PER_BYTE);
 	
 	if (debug_level >= INFO)
