@@ -126,7 +126,7 @@ void bitext_rsh::compute_r_l() {
 	#ifdef USE_NTL
 			cerr << "Picked rsh bit extractor irreducible polynomial "
 			     << irred_poly << endl;
-	#elif !defined USE_CUDA
+	#elif USE_OSSL
 			cerr << "Picked rsh bit extractor irreducible polynomial ";
 			for (auto i : irred_poly)
 				cerr << i << " ";
@@ -181,7 +181,7 @@ void bitext_rsh::create_coefficients() {
 	uint64_t elems_per_coeff = ceil(l/(long double)BITS_PER_TYPE(chunk_t));
 	vector<chunk_t> vec(elems_per_coeff);
 
-#if !defined USE_NTL && !defined USE_CUDA
+#ifdef USE_OSSL
 	coeffs.resize(r);
 #endif
 	for (uint64_t i = 0; i < r; i++) { // Iteration über alle Koeffizienten
@@ -204,7 +204,7 @@ void bitext_rsh::create_coefficients() {
 			cerr << "RSH Coefficient " << i << ": " << val << endl;
 
 		SetCoeff(poly, i, val);
-#else
+#elif USE_OSSL
 		coeffs[i] = BN_new();
 		BN_bin2bn(reinterpret_cast<const unsigned char*>(&vec[0]),
 			  sizeof(chunk_t)*vec.size()/sizeof(char), coeffs[i]);
