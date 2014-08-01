@@ -1,4 +1,6 @@
-#include "Montgomery.cuh"
+#define INCLUDE_FROM_CUDA_FILE
+#include "PolyEvalGF2nBN.cuh"
+#undef INCLUDE_FROM_CUDA_FILE
 
 ////////////////////////////////////////////////////////////////////////////////
 /*
@@ -14,13 +16,13 @@
 //	must be big enough to store an additional carry bit (size = size_field + 1)!
 //
 //	Input:
-//		coeffs 			- the coefficients of the polynomial
-//		x 				- point where the polynomial is evaluated
-//		size_field  	- number of bits of the field elements
-//		deg_poly 		- degree of the evaluated polynom
-//		irred_poly 		- the irreducible polynomial of the GF(2n)
-// 		mask 			- mask of the field
-//		result			- the result
+//		coeffs 			- the coefficients of the polynomial		-> size = (k + 1) * (n + 1)
+//		x 				- point where the polynomial is evaluated	-> size = n + 1
+//		size_field  	- number of bits of the field elements		-> n
+//		deg_poly 		- degree of the evaluated polynomial 		-> k
+//		irred_poly 		- the irreducible polynomial of the GF(2n) 	-> size = n + 1
+// 		mask 			- mask of the field 						-> size = n + 1
+//		result			- the result 								-> size = n + 1
 //
 ////////////////////////////////////////////////////////////////////////////////
 void evaluateGF2nPolyBN(
@@ -41,23 +43,28 @@ void evaluateGF2nPolyBN(
 	// Calcualte the amount of leaves needed for used binary tree method
 	sfixn width_binary_tree = getCeilToPotOf2n(count_coeffs);
 
-	// Allocate device data
+	// How many bytes do we need for one field element
+	sfixn bytes_for_chunks = num_chunks * SIZE_CHUNK / SIZE_BYTE;
+
+	// Define all device variables
 	sfixn *dx, *dCoeffs, *dIrred_poly, *dMask, *dTmp_Result;
-	sfixn bytes_for_chunks = num_chunks*SIZE_CHUNK/SIZE_BYTE;
+	
+	// Allocate the device variables
 	cudaMalloc((sfixn**)&dx, bytes_for_chunks);
-	cudaMalloc((sfixn**)&dCoeffs, count_coeffs*bytes_for_chunks);
+	cudaMalloc((sfixn**)&dCoeffs, count_coeffs * bytes_for_chunks);
 	cudaMalloc((sfixn**)&dIrred_poly, bytes_for_chunks);
 	cudaMalloc((sfixn**)&dMask, bytes_for_chunks);
-	cudaMalloc((sfixn**)&dTmp_Result, count_coeffs*bytes_for_chunks);
+	cudaMalloc((sfixn**)&dTmp_Result, count_coeffs * bytes_for_chunks);
 
 	// Copy host data to device
 	cudaMemcpy(dx, x, bytes_for_chunks, cudaMemcpyHostToDevice);
-	cudaMemcpy(dCoeffs, coeffs, count_coeffs*bytes_for_chunks, cudaMemcpyHostToDevice);
+	cudaMemcpy(dCoeffs, coeffs, count_coeffs * bytes_for_chunks, cudaMemcpyHostToDevice);
 	cudaMemcpy(dIrred_poly, irred_poly, bytes_for_chunks, cudaMemcpyHostToDevice);
 	cudaMemcpy(dMask, mask, bytes_for_chunks, cudaMemcpyHostToDevice);
 
 	// Create all exponentiation from x^0 to x^deg_poly and store it in res 
-	sfixn sharedMemory_ExpTree = 3*num_chunks + width_binary_tree*num_chunks;
+	sfixn sharedMemory_ExpTree = num_chunks; // shared memory for x
+	sharedMemory_ExpTree = sharedMemory_ExpTree + width_binary_tree * num_chunks; width_binary_tree/2;
 	cudaCreateExpTreeBNKernel<<<width_binary_tree/2, 1, sharedMemory_ExpTree>>>(dx, size_field, deg_poly, dIrred_poly, dMask, width_binary_tree, dTmp_Result);
 
 	// Multiply each coefficient with its related exponentiation of x 

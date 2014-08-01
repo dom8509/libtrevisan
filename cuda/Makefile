@@ -1,8 +1,7 @@
 TARGET=libtrevisancuda.a
 
-SRC=Montgomery.cu
-HEADER=libtrevisancuda.h \
-		Montgomery.cuh \
+SRC=PolyEvalGF2nBN.cu
+HEADER=PolyEvalGF2nBN.cuh \
         CudaTypes.h
 OBJ=${SRC:.cu=.o}
 
@@ -12,7 +11,7 @@ AR=ar
 CCFLAGS=-DLINUXINTEL64 -arch=compute_35 -m64 -rdc=true
 
 all:  
-	nvcc -lib -DLINUXINTEL64 --cubin -arch=sm_35 -m64 -rdc=true Montgomery.cu
+	nvcc -lib -DLINUXINTEL64 --cubin -arch=sm_35 -m64 -rdc=true $(SRC)
 
 lib: $(TARGET)
 
