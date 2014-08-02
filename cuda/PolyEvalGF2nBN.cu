@@ -64,7 +64,7 @@ void evaluateGF2nPolyBN(
 
 	// Create all exponentiation from x^0 to x^deg_poly and store it in res 
 	sfixn sharedMemory_ExpTree = num_chunks; // shared memory for x
-	sharedMemory_ExpTree = sharedMemory_ExpTree + width_binary_tree * num_chunks; width_binary_tree/2;
+	sharedMemory_ExpTree = sharedMemory_ExpTree + 2*num_chunks*width_binary_tree/2 + width_binary_tree * num_chunks;
 	cudaCreateExpTreeBNKernel<<<width_binary_tree/2, 1, sharedMemory_ExpTree>>>(dx, size_field, deg_poly, dIrred_poly, dMask, width_binary_tree, dTmp_Result);
 
 	// Multiply each coefficient with its related exponentiation of x 
@@ -131,6 +131,12 @@ __host__ sfixn getCeilToPotOf2n( sfixn value ) {
 	}
 
 	return res;
+}
+
+__host__ sfixn getNumberBlocksForSharedMem( sfixn sharedMemSize ) {
+
+	return 0;
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -239,14 +245,14 @@ __global__ void cudaBitShiftRightBNKernel(sfixn* a, sfixn length_a, sfixn n, sfi
 		} else {
 			sfixn digits_block_b_shift = (max_src_range + 1) % SIZE_CHUNK;
 			if(min_src_range < 0) {
-				sfixn mask_b = (2^SIZE_CHUNK-1) - (2^(SIZE_CHUNK-(max_src_range%SIZE_CHUNK))-1);
+				sfixn mask_b = pow((double)2, (double)SIZE_CHUNK - 1) - pow((double)2, (double)(SIZE_CHUNK-(max_src_range%SIZE_CHUNK)) - 1);
 				sfixn src_idx_b = max_src_range/SIZE_CHUNK;
 				c[thid] = ((a[src_idx_b]&mask_b) >> (SIZE_CHUNK-(max_src_range%SIZE_CHUNK)));
 			} else if(digits_block_b_shift == 0) {
 				c[thid] = a[min_src_range/SIZE_CHUNK];
 			} else {
-				sfixn mask_a = 2^(SIZE_CHUNK-(min_src_range%SIZE_CHUNK))-1;
-				sfixn mask_b = (2^SIZE_CHUNK-1) - (2^(SIZE_CHUNK-(max_src_range%SIZE_CHUNK))-1);
+				sfixn mask_a = pow((double)2, (double)(SIZE_CHUNK-(min_src_range%SIZE_CHUNK))) - 1;
+				sfixn mask_b = (pow((double)2, (double)SIZE_CHUNK) - 1) - (pow((double)2, (double)(SIZE_CHUNK-(max_src_range%SIZE_CHUNK))) - 1);
 
 				sfixn src_idx_a = min_src_range/SIZE_CHUNK;
 				sfixn src_idx_b = max_src_range/SIZE_CHUNK;
@@ -276,14 +282,14 @@ __global__ void cudaBitShiftLeftBNKernel(sfixn* a, sfixn num_chunks, sfixn n, sf
 		} else {
 			bool shift_whole_block = ((max_src_range + 1) % SIZE_CHUNK == 0);
 			if( max_src_range >= num_chunks * SIZE_CHUNK ) {
-				sfixn mask_b = 2^(SIZE_CHUNK-(min_src_range % SIZE_CHUNK)) - 1;
+				sfixn mask_b = pow((double)2, (double)(SIZE_CHUNK-(min_src_range % SIZE_CHUNK))) - 1;
 				sfixn src_idx_b = min_src_range/SIZE_CHUNK;
 				c[thid] = ((a[src_idx_b]&mask_b) << (min_src_range%SIZE_CHUNK));
 			} else if( shift_whole_block ) {
 				c[thid] = a[min_src_range/SIZE_CHUNK];
 			} else {
-				sfixn mask_a = 2^(SIZE_CHUNK-(min_src_range%SIZE_CHUNK))-1;
-				sfixn mask_b = (2^SIZE_CHUNK-1) - (2^(SIZE_CHUNK-((max_src_range+1)%SIZE_CHUNK))-1);
+				sfixn mask_a = pow((double)2, (double)(SIZE_CHUNK-(min_src_range%SIZE_CHUNK))) - 1;
+				sfixn mask_b = (pow((double)2, (double)SIZE_CHUNK) - 1) - (pow((double)2, (double)(SIZE_CHUNK-((max_src_range+1)%SIZE_CHUNK))) - 1);
 
 				sfixn src_idx_a = min_src_range/SIZE_CHUNK;
 				sfixn src_idx_b = max_src_range/SIZE_CHUNK;
@@ -304,7 +310,6 @@ __global__ void cudaCopyBNKernel( sfixn* a, sfixn num_chunks_a, sfixn* b, sfixn 
 		else
 			b[threadIdx.x] = 0;
 	}
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -502,4 +507,4 @@ __host__ __device__ sfixn getNumberChunks( sfixn length ) {
 	} else {
 		return (length-1)/SIZE_CHUNK+1;
 	}
-}
+} 

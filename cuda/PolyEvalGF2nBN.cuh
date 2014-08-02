@@ -15,6 +15,7 @@ void evaluateGF2nPolyBN(sfixn* coeffs, sfixn* x, sfixn size_field, sfixn deg_pol
 */
 __host__ sfixn getCeilToPotOf2n(sfixn value);
 __host__ void padWithZeros(sfixn* data_old, sfixn size_old, sfixn size_field, sfixn* data_new, sfixn size_new);
+__host__ sfixn getNumberBlocksForSharedMem(sfixn sharedMemSize );
 
 /*
 	Kernel Functions
@@ -23,7 +24,7 @@ __global__ void cudaCreateExpTreeBNKernel(sfixn* x, sfixn size_field, sfixn deg_
 __global__ void cudaMontgMulBNKernel(sfixn* values, sfixn* x_preCalc, sfixn field_size, sfixn* irred_poly, sfixn length_irred_poly, sfixn* irred_poly_mask, sfixn* res);
 __global__ void cudaBitSumBNKernel(sfixn* values, sfixn length_values, sfixn n);
 __global__ void cudaCopyBNKernel(sfixn* a, sfixn num_chunks_a, sfixn* b, sfixn num_chunks_b);
-__global__ void cudaExpandVecBNKernel(sfixn* value, sfixn blocks_per_value, sfixn* value_vec, sfixn blocks_value_vec) ;
+__global__ void cudaExpandVecBNKernel(sfixn* value, sfixn blocks_per_value, sfixn* value_vec, sfixn blocks_value_vec);
 __global__ void cudaSet0Kernel(sfixn* x, sfixn length);
 __global__ void cudaBitAddBNKernel(sfixn* a, sfixn* b, sfixn num_chunks);
 
