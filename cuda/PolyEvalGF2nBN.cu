@@ -4,6 +4,20 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 /*
+	Some constant memory variables
+*/
+////////////////////////////////////////////////////////////////////////////////
+// Device side
+__constant__ sfixn dMaxThreadsPerBlock;
+__constant__ sfixn dSharedMemPerBlock;
+
+// Host side
+static sfixn hMaxThreadsPerBlock;
+static sfixn hSharedMemPerBlock;
+
+
+////////////////////////////////////////////////////////////////////////////////
+/*
 	Host Functions
 */
 ////////////////////////////////////////////////////////////////////////////////
@@ -46,52 +60,45 @@ void evaluateGF2nPolyBN(
 	// How many bytes do we need for one field element
 	sfixn bytes_for_chunks = num_chunks * SIZE_CHUNK / SIZE_BYTE;
 
+	// Lead device properties to constant memory
+	loadPoroperties();
+
 	// Define all device variables
 	sfixn *dx, *dCoeffs, *dIrred_poly, *dMask, *dTmp_Result;
 	
 	// Allocate the device variables
 	cudaMalloc((sfixn**)&dx, bytes_for_chunks);
-	cudaMalloc((sfixn**)&dCoeffs, count_coeffs * bytes_for_chunks);
+	cudaMalloc((sfixn**)&dCoeffs, width_binary_tree * bytes_for_chunks);
 	cudaMalloc((sfixn**)&dIrred_poly, bytes_for_chunks);
 	cudaMalloc((sfixn**)&dMask, bytes_for_chunks);
-	cudaMalloc((sfixn**)&dTmp_Result, count_coeffs * bytes_for_chunks);
+	cudaMalloc((sfixn**)&dTmp_Result, width_binary_tree * bytes_for_chunks);
+
+	sfixn hCoeffs[width_binary_tree*num_chunks*SIZE_CHUNK/SIZE_BYTE];
+	padWithZeros(coeffs, count_coeffs, num_chunks, hCoeffs, width_binary_tree);
 
 	// Copy host data to device
 	cudaMemcpy(dx, x, bytes_for_chunks, cudaMemcpyHostToDevice);
-	cudaMemcpy(dCoeffs, coeffs, count_coeffs * bytes_for_chunks, cudaMemcpyHostToDevice);
+	cudaMemcpy(dCoeffs, hCoeffs, width_binary_tree * bytes_for_chunks, cudaMemcpyHostToDevice);
 	cudaMemcpy(dIrred_poly, irred_poly, bytes_for_chunks, cudaMemcpyHostToDevice);
 	cudaMemcpy(dMask, mask, bytes_for_chunks, cudaMemcpyHostToDevice);
 
 	// Create all exponentiation from x^0 to x^deg_poly and store it in res 
-	sfixn sharedMemory_ExpTree = num_chunks; // shared memory for x
-	sharedMemory_ExpTree = sharedMemory_ExpTree + 2*num_chunks*width_binary_tree/2 + width_binary_tree * num_chunks;
-	cudaCreateExpTreeBNKernel<<<width_binary_tree/2, 1, sharedMemory_ExpTree>>>(dx, size_field, deg_poly, dIrred_poly, dMask, width_binary_tree, dTmp_Result);
+	cudaCreateExpTreeBNKernel<<<min(width_binary_tree/2, hMaxThreadsPerBlock), ceil((double)width_binary_tree/2/hMaxThreadsPerBlock), width_binary_tree/2*num_chunks>>>(dx, size_field, deg_poly, dIrred_poly, dMask, width_binary_tree, dTmp_Result);
 
 	// Multiply each coefficient with its related exponentiation of x 
 	// (coeff[0]*x^0, ..., coeff[deg_poly]*x^deg_poly) and store it in res
-	cudaMontgMulBNKernel<<<deg_poly+1, 1, 2*num_chunks>>>(dCoeffs, dTmp_Result, size_field, dIrred_poly, size_field+1, dMask, dTmp_Result);
-
-	sfixn hTmp_Result[count_coeffs*bytes_for_chunks];
-	cudaMemcpy(hTmp_Result, dTmp_Result, count_coeffs*bytes_for_chunks, cudaMemcpyDeviceToHost);
-
-	// Create leaves for sub sum tree
-	sfixn hSummands[width_binary_tree*num_chunks*SIZE_CHUNK/SIZE_BYTE];
-	padWithZeros(hTmp_Result, count_coeffs, size_field, hSummands, width_binary_tree);
-
-	// Copy sub sum tree leaves to device
-	sfixn* dSummands;
-	cudaMalloc((sfixn**)&dSummands, width_binary_tree*num_chunks*SIZE_CHUNK/SIZE_BYTE);
-	cudaMemcpy(dSummands, hSummands, width_binary_tree*num_chunks*SIZE_CHUNK/SIZE_BYTE, cudaMemcpyHostToDevice);
+	cudaMontgMulBNKernel<<<min(width_binary_tree, hMaxThreadsPerBlock), ceil((double)width_binary_tree/hMaxThreadsPerBlock)>>>(dCoeffs, dTmp_Result, width_binary_tree, num_chunks, dIrred_poly, dTmp_Result);
 
 	// Add all summands of the polynom up to the result
-	cudaBitSumBNKernel<<<width_binary_tree, 1>>>(dSummands, num_chunks, width_binary_tree);
+	cudaBitSumBNKernel<<<min(width_binary_tree/2, hMaxThreadsPerBlock), ceil((double)width_binary_tree/2/hMaxThreadsPerBlock)>>>(dTmp_Result, num_chunks, width_binary_tree);
 
 	// Read the result from device
-	cudaMemcpy(hSummands, dSummands, width_binary_tree*num_chunks*SIZE_CHUNK/SIZE_BYTE, cudaMemcpyDeviceToHost);
+	sfixn hTmp_Result[width_binary_tree * bytes_for_chunks];
+	cudaMemcpy(hTmp_Result, dTmp_Result, width_binary_tree * bytes_for_chunks, cudaMemcpyDeviceToHost);
 
 	// Create result
 	for( sfixn i=0; i<num_chunks; ++i ) {
-		result[i] = hSummands[(width_binary_tree - 1) * num_chunks + i];
+		result[i] = hTmp_Result[i];
 	}
 
 	// Free all allocated device memory
@@ -100,18 +107,38 @@ void evaluateGF2nPolyBN(
 	cudaFree(dIrred_poly);
 	cudaFree(dMask);
 	cudaFree(dTmp_Result);
-	cudaFree(dSummands);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Load some cuda properties to constant memory
+//
+////////////////////////////////////////////////////////////////////////////////
+__host__ void loadPoroperties() {
+
+	cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, 0);
+    cudaMemcpyToSymbol(&dMaxThreadsPerBlock, &deviceProp.maxThreadsPerBlock, sizeof(sfixn));
+	cudaMemcpyToSymbol(&dSharedMemPerBlock, &deviceProp.sharedMemPerBlock, sizeof(sfixn));
+
+	hMaxThreadsPerBlock = deviceProp.maxThreadsPerBlock;
+	hSharedMemPerBlock = deviceProp.sharedMemPerBlock;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Adds leading zero blocks to the array so that its new size matches size_new
+//
+////////////////////////////////////////////////////////////////////////////////
 __host__ void padWithZeros( 
 	sfixn* data_old, 
 	sfixn size_old, 
-	sfixn size_field, 
+	sfixn num_chunks, 
 	sfixn* data_new, 
 	sfixn size_new ) {
 
-	for( sfixn i=size_old*size_field-1; i>=0; --i ) {
-		if( i >= size_old - size_old ) {
+	for( sfixn i=size_new*num_chunks-1; i>=0; --i ) {
+		if( i >= size_new - size_old ) {
 			data_new[i] = data_old[i - (size_old - size_old)];
 		} else {
 			data_new[i] = 0;
@@ -119,6 +146,11 @@ __host__ void padWithZeros(
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Returns the next higher pot of 2 of the passed value
+//
+////////////////////////////////////////////////////////////////////////////////
 __host__ sfixn getCeilToPotOf2n( sfixn value ) {
 	
 	sfixn res = 0;
@@ -136,7 +168,6 @@ __host__ sfixn getCeilToPotOf2n( sfixn value ) {
 __host__ sfixn getNumberBlocksForSharedMem( sfixn sharedMemSize ) {
 
 	return 0;
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -164,73 +195,69 @@ __global__ void cudaCreateExpTreeBNKernel(
 	sfixn length_exp_tree,
 	sfixn* res) {
 
-    sfixn thid = threadIdx.x;
+    sfixn thid = threadIdx.x * blockIdx.x;
 
-    extern __shared__ sfixn* shared;
+    if( thid < length_exp_tree/2 ) {
 
-	sfixn num_chunks_x = getNumberChunks(size_field);
-	sfixn *tmp1 = &shared[0];												// <- TODO: überschreibt nicht jeder kernel den anderen da nicht const???
-	sfixn *tmp2 = &shared[num_chunks_x];
-	sfixn *xTile = &shared[2*num_chunks_x];									// shared memory for x
-	sfixn *leaves = &shared[2*num_chunks_x+num_chunks_x*length_exp_tree];	// shared memory for res
+	    extern __shared__ sfixn* shared;
 
-	// copy x to shared memory xTile
-	cudaCopyBNKernel<<<num_chunks_x, 1>>>(x, num_chunks_x, xTile, num_chunks_x);
+		sfixn num_chunks = getNumberChunks(size_field);
+		sfixn *tmp = &shared[thid * num_chunks];			
 
-	// Fill leaves with x (Bsp size_field = 3: [x0, x1, x2, x0, x1, x2, ...])
-	cudaExpandVecBNKernel<<<num_chunks_x*length_exp_tree, 1>>>(x, size_field, leaves, num_chunks_x*length_exp_tree);
+		// Fill res with x (Bsp size_field = 3: [x0, x1, x2, x0, x1, x2, ...])
+		cudaExpandVecBNKernel<<<min(num_chunks*length_exp_tree, dMaxThreadsPerBlock), ceil((double)num_chunks*length_exp_tree/dMaxThreadsPerBlock)>>>(x, num_chunks, res, num_chunks*length_exp_tree);
 
-    sfixn offset = 1;
+	    sfixn offset = 1;
 
- 	for( sfixn d=length_exp_tree>>1; d>0; d>>=1 ) { //build sum in place up the tree 
- 		__syncthreads();
+	 	for( sfixn d=length_exp_tree>>1; d>0; d>>=1 ) { //build sum in place up the tree 
+	 		__syncthreads();
 
- 		if( thid < d ) {
- 			sfixn ai = (offset * (2*thid+1) - 1) * size_field;
- 			sfixn bi = (offset * (2*thid+2) - 1) * size_field;
+	 		if( thid < d ) {
+	 			sfixn ai = (offset * (2*thid+1) - offset) * num_chunks;
+	 			sfixn bi = (offset * (2*thid+2) - offset) * num_chunks;
 
- 			// Calculate temp_bi = temp_ai * temp_bi
-			cudaMontgMulBN(
-				&leaves[ai], 
-				&leaves[bi],
-				size_field,
-				irred_poly, mask,
-				tmp1,
-				tmp2,
-				&leaves[bi]);
- 		}
+	 			// Calculate temp_bi = temp_ai * temp_bi
+				cudaMontgMulBN(
+					&res[ai], 
+					&res[bi],
+					num_chunks,
+					irred_poly,
+					&res[ai]);
+	 		}
 
- 		offset <<= 1;
+	 		offset <<= 1;
+		}
+
+		if( thid == 0 )
+			cudaSet0Kernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&res[0], num_chunks);
+
+		for( sfixn d=1; d<deg_poly; d*=2 ) { //traverse down tree & build scan 
+
+		    offset >>= 1;
+		    __syncthreads();
+
+			if( thid < d ) {
+				sfixn ai = (offset * (2*thid+1) - offset) * num_chunks;
+		 		sfixn bi = (offset * (2*thid+2) - offset) * num_chunks;
+
+		        cudaCopyBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&res[bi], num_chunks, tmp, num_chunks);
+		        cudaCopyBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&res[ai], num_chunks, &res[bi], num_chunks);
+		        cudaBitAddBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&res[ai], tmp, num_chunks);
+		    }
+		}
+
+		__syncthreads();
 	}
-
-	if( thid == 0 )
-		cudaSet0Kernel<<<num_chunks_x, 1>>>(&leaves[deg_poly*size_field-1], num_chunks_x);
-
-	for( sfixn d=1; d<deg_poly; d*=2 ) { //traverse down tree & build scan 
-
-	    offset >>= 1;
-	    __syncthreads();
-
-		if( thid < d ) {
-			sfixn ai = (offset * (2*thid+1) - 1) * size_field;
-	 		sfixn bi = (offset * (2*thid+2) - 1) * size_field;
-
-	        cudaCopyBNKernel<<<num_chunks_x, 1>>>(&leaves[ai], num_chunks_x, tmp1, num_chunks_x);
-	        cudaCopyBNKernel<<<num_chunks_x, 1>>>(&leaves[bi], num_chunks_x, &leaves[ai], num_chunks_x);
-	        cudaBitAddBNKernel<<<num_chunks_x, 1>>>(&leaves[bi], tmp1, num_chunks_x);
-	    }
-	}
-
-	__syncthreads(); 
-
-	// write result back to global memeory
-	cudaCopyBNKernel<<<num_chunks_x, 1>>>(&leaves[2*thid*size_field], num_chunks_x, &res[2*thid*size_field], num_chunks_x);
-	cudaCopyBNKernel<<<num_chunks_x, 1>>>(&leaves[(2*thid+2)*size_field], num_chunks_x, &res[(2*thid+1)*size_field], num_chunks_x);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Shifts a n bits to the right
+//
+////////////////////////////////////////////////////////////////////////////////
 __global__ void cudaBitShiftRightBNKernel(sfixn* a, sfixn length_a, sfixn n, sfixn* c) {
 
-	sfixn thid = threadIdx.x;
+	sfixn thid = threadIdx.x * blockIdx.x;
 
 	if(thid < getNumberChunks(length_a)) {
 
@@ -265,9 +292,14 @@ __global__ void cudaBitShiftRightBNKernel(sfixn* a, sfixn length_a, sfixn n, sfi
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Shifts a n bits to the left
+//
+////////////////////////////////////////////////////////////////////////////////
 __global__ void cudaBitShiftLeftBNKernel(sfixn* a, sfixn num_chunks, sfixn n, sfixn* c) {
 
-	sfixn thid = threadIdx.x;
+	sfixn thid = threadIdx.x * blockIdx.x;
 
 	if( thid < num_chunks ) {
 
@@ -302,10 +334,17 @@ __global__ void cudaBitShiftLeftBNKernel(sfixn* a, sfixn num_chunks, sfixn n, sf
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Copies a to b
+//
+////////////////////////////////////////////////////////////////////////////////
 __global__ void cudaCopyBNKernel( sfixn* a, sfixn num_chunks_a, sfixn* b, sfixn num_chunks_b ) {
 
-	if(threadIdx.x < num_chunks_b) {
-		if(threadIdx.x < num_chunks_a)
+	sfixn thid = threadIdx.x * blockIdx.x;
+
+	if( thid < num_chunks_b ) {
+		if( thid < num_chunks_a )
 			b[threadIdx.x] = a[threadIdx.x];
 		else
 			b[threadIdx.x] = 0;
@@ -320,64 +359,69 @@ __global__ void cudaCopyBNKernel( sfixn* a, sfixn num_chunks_a, sfixn* b, sfixn 
 __global__ void cudaMontgMulBNKernel(
 	sfixn* values,
 	sfixn* x_preCalc,
-	sfixn field_size, 
-	sfixn* irred_poly, sfixn length_irred_poly, sfixn* irred_poly_mask, 
+	sfixn num_values,
+	sfixn num_chunks, 
+	sfixn* irred_poly,
 	sfixn* res) {
 
-	sfixn thid = threadIdx.x;
+	sfixn thid = threadIdx.x * blockIdx.x;
 
-	extern __shared__ sfixn *shared;
+	if( thid < num_values ) {
 
-	sfixn num_chunks = getNumberChunks(field_size+1);
+		for( sfixn i=num_chunks-1; i>=0; --i ) {
 
-	sfixn *tmp_a = &shared[0];
-	sfixn *tmp_b = &shared[num_chunks];
-	cudaCopyBNKernel<<<num_chunks, 1>>>(&x_preCalc[thid*field_size], num_chunks, tmp_a, num_chunks);
+			sfixn bitnum = 0;
 
-	for( sfixn i=num_chunks-1; i>=0; --i ) {
+			for( sfixn j=0; j<SIZE_CHUNK; ++j ) {
 
-		sfixn mask = 1;
+				if( isbitset(values[thid*num_chunks+i], bitnum) ) 
+					cudaBitAddBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&res[thid*num_chunks], &x_preCalc[thid*num_chunks], num_chunks);
 
-		for( sfixn j=0; j<SIZE_CHUNK; ++j ) {
+				cudaBitShiftLeft1BN(&x_preCalc[thid*num_chunks], num_chunks);
+				cudaReducePolyBN(&x_preCalc[thid*num_chunks], num_chunks, irred_poly, num_chunks);
 
-			if( values[thid*field_size+i]&mask > 0 ) 
-				cudaBitAddBNKernel<<<num_chunks, 1>>>(&res[thid*field_size], tmp_a, num_chunks);
-
-			cudaBitShiftLeftBNKernel<<<num_chunks, 1>>>(tmp_a, num_chunks, 1, tmp_b);
-			cudaReducePolyBN(tmp_b, num_chunks, irred_poly, irred_poly_mask, tmp_a);
-			cudaCopyBNKernel<<<num_chunks, 1>>>(tmp_b, num_chunks, tmp_a, num_chunks);
-
-			mask <<= 1;
+				++bitnum;
+			}
 		}
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Sums up all passed values
+//
+////////////////////////////////////////////////////////////////////////////////
 __global__ void cudaBitSumBNKernel(
 	sfixn* values, 
-	sfixn field_size,
+	sfixn num_chunks,
 	sfixn n ) {
 
-	sfixn thid = threadIdx.x;
+	sfixn thid = threadIdx.x * blockIdx.x;
 
-	sfixn num_chunks = getNumberChunks(field_size+1);
+	if( thid < n/2 ) {
+		sfixn offset = 1;
 
-	sfixn offset = 1;
+		for( sfixn d=n>>1; d>0; d>>=1 ) {
+	 		__syncthreads();
 
-	for( sfixn d=n>>1; d>0; d>>=1 ) {
- 		__syncthreads();
+	 		if( thid < d ) {
+	 			sfixn ai = (offset * (2*thid+1) - offset) * num_chunks;
+	 			sfixn bi = (offset * (2*thid+2) - offset) * num_chunks;
 
- 		if( thid < d ) {
- 			sfixn ai = (offset * (2*thid+1) - 1) * field_size;
- 			sfixn bi = (offset * (2*thid+2) - 1) * field_size;
+	 			// Calculate values_bi = values_ai + values_bi
+				cudaBitAddBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&values[bi], &values[ai], num_chunks);
+	 		}
 
- 			// Calculate values_bi = values_ai + values_bi
-			cudaBitAddBNKernel<<<num_chunks, 1>>>(&values[bi], &values[ai], num_chunks);
- 		}
-
- 		offset <<= 1;
+	 		offset <<= 1;
+		}
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Creates a vector that contains n instances of the value
+//
+////////////////////////////////////////////////////////////////////////////////
 __global__ void cudaExpandVecBNKernel(
 	sfixn* value,
 	sfixn blocks_per_value,
@@ -385,12 +429,22 @@ __global__ void cudaExpandVecBNKernel(
 	sfixn blocks_value_vec
 	) {
 
-	if( threadIdx.x < blocks_value_vec )
+	sfixn thid = threadIdx.x * blockIdx.x;
+
+	if( thid < blocks_value_vec )
 		value_vec[threadIdx.x] = value[threadIdx.x % blocks_per_value];
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Sets x to 0
+//
+////////////////////////////////////////////////////////////////////////////////
 __global__ void cudaSet0Kernel( sfixn* x, sfixn length ) {
-	if( threadIdx.x < length )
+
+	sfixn thid = threadIdx.x * blockIdx.x;
+
+	if( thid < length )
 		x[threadIdx.x] = 0;
 }
 
@@ -401,7 +455,7 @@ __global__ void cudaSet0Kernel( sfixn* x, sfixn length ) {
 ////////////////////////////////////////////////////////////////////////////////
 __global__ void cudaBitAddBNKernel(sfixn* a, sfixn* b, sfixn num_chunks) {
 
-	sfixn thid = threadIdx.x;
+	sfixn thid = threadIdx.x * blockIdx.x;
 
 	if( thid < num_chunks )
 		a[thid] ^= b[thid];
@@ -414,7 +468,7 @@ __global__ void cudaBitAddBNKernel(sfixn* a, sfixn* b, sfixn num_chunks) {
 ////////////////////////////////////////////////////////////////////////////////
 __global__ void cudaBitAndBNKernel(sfixn* a, sfixn* b, sfixn* c, sfixn num_chunks) {
 
-	sfixn thid = threadIdx.x;
+	sfixn thid = threadIdx.x * blockIdx.x;
 
 	if( thid < num_chunks )
 		c[thid] = a[thid] & b[thid];
@@ -433,30 +487,25 @@ __global__ void cudaBitAndBNKernel(sfixn* a, sfixn* b, sfixn* c, sfixn num_chunk
 __device__ void cudaMontgMulBN(
 	sfixn* a, 
 	sfixn* b, 
-	sfixn size_field,
+	sfixn num_chunks,
 	sfixn* irred_poly, 
-	sfixn* irred_poly_mask, 
-	sfixn* tmp_a, sfixn* tmp_b,
 	sfixn* res) {
-
-	sfixn mask = 1;
-	sfixn num_chunks = getNumberChunks(size_field+1);
-
-	cudaCopyBNKernel<<<num_chunks, 1>>>(a, num_chunks, tmp_a, num_chunks);
 
 	for( sfixn i=num_chunks-1; i>=0; --i ) {
 
+		sfixn bitnum = 0;
+
 		for( sfixn j=0; j<SIZE_CHUNK; ++j ) {
 
-			if( b[i]&mask > 0 )
-				cudaBitAddBNKernel<<<num_chunks, 1>>>(res, tmp_a, num_chunks);
+			if( isbitset(b[i], bitnum) ) 
+				cudaBitAddBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(res, a, num_chunks);
 
-			cudaBitShiftLeftBNKernel<<<num_chunks, 1>>>(tmp_a, num_chunks, 1, tmp_b);
-			cudaReducePolyBN(tmp_b, num_chunks, irred_poly, irred_poly_mask, tmp_a);
-			cudaCopyBNKernel<<<num_chunks, 1>>>(tmp_b, num_chunks, tmp_a, num_chunks);
+			cudaBitShiftLeft1BN(a, num_chunks);
+			cudaReducePolyBN(a, num_chunks, irred_poly, num_chunks);
 
-			mask <<= 1;
+			++bitnum;
 		}
+
 	}
 }
 
@@ -466,16 +515,14 @@ __device__ void cudaMontgMulBN(
 //
 ////////////////////////////////////////////////////////////////////////////////
 __device__ void cudaReducePolyBN(
-	sfixn* coeffs,
-	sfixn num_chunks_coeffs,
+	sfixn* value,
+	sfixn num_chunks,
 	sfixn* irred_poly,
-	sfixn* irred_poly_mask,
-	sfixn* tmp
+	sfixn pos_msb
 	) {
 
-	cudaBitAndBNKernel<<<num_chunks_coeffs, 1>>>(coeffs, irred_poly_mask, tmp, num_chunks_coeffs);
-	if( cudaBitCheckBN(tmp, num_chunks_coeffs) )
-		cudaBitAddBNKernel<<<num_chunks_coeffs, 1>>>(coeffs, irred_poly, num_chunks_coeffs);
+	if( isbitset(value[0], pos_msb) ) 
+		cudaBitAddBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(value, irred_poly, num_chunks);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -498,13 +545,42 @@ __device__ bool cudaBitCheckBN( sfixn* x, sfixn num_chunks ) {
 
 ////////////////////////////////////////////////////////////////////////////////
 //
+//	Shift a 1 Bit to the left
+//
+////////////////////////////////////////////////////////////////////////////////
+__device__ void cudaBitShiftLeft1BN( sfixn* a, sfixn num_chunks ) {
+	longfixnum tmp = 0;
+	sfixn carry = 0;
+
+	longfixnum lmask = pow((double)2, (double)SIZE_CHUNK) - 1;
+	longfixnum umask = (pow((double)2, (double)2*SIZE_CHUNK) - 1) - lmask;
+
+	for( sfixn i = num_chunks - 1; i >= 0; --i ) {
+		tmp = a[i] << 1;
+		a[i] = (tmp&lmask) | carry;
+		carry = (tmp&umask) >> SIZE_CHUNK;
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//
 //	Calculates the number of chunks for the diggit length
 //
 ////////////////////////////////////////////////////////////////////////////////
 __host__ __device__ sfixn getNumberChunks( sfixn length ) {
+
 	if( !length ) {
 		return 0;
 	} else {
 		return (length-1)/SIZE_CHUNK+1;
 	}
 } 
+
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Checks if the bit at pos bitnum is set (idx from right to left)
+//
+////////////////////////////////////////////////////////////////////////////////
+__host__ __device__ sfixn isbitset( sfixn val, sfixn bitnum ) {
+	return (val & (1 << bitnum)) != 0;
+}
