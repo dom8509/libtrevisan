@@ -83,7 +83,7 @@ void evaluateGF2nPolyBN(
 	cudaMemcpy(dMask, mask, bytes_for_chunks, cudaMemcpyHostToDevice);
 
 	// Create all exponentiation from x^0 to x^deg_poly and store it in res 
-	cudaCreateExpTreeBNKernel<<<min(width_binary_tree/2, hMaxThreadsPerBlock), ceil((double)width_binary_tree/2/hMaxThreadsPerBlock), width_binary_tree/2*num_chunks>>>(dx, size_field, deg_poly, dIrred_poly, dMask, width_binary_tree, dTmp_Result);
+	cudaCreateExpTreeBNKernel<<<min(width_binary_tree/2, hMaxThreadsPerBlock), ceil((double)width_binary_tree/2/hMaxThreadsPerBlock), width_binary_tree/2*num_chunks>>>(dx, num_chunks, deg_poly, dIrred_poly, dMask, width_binary_tree, dTmp_Result);
 
 	// Multiply each coefficient with its related exponentiation of x 
 	// (coeff[0]*x^0, ..., coeff[deg_poly]*x^deg_poly) and store it in res
@@ -188,7 +188,7 @@ __host__ sfixn getNumberBlocksForSharedMem( sfixn sharedMemSize ) {
 ////////////////////////////////////////////////////////////////////////////////
 __global__ void cudaCreateExpTreeBNKernel(
 	sfixn* x, 
-	sfixn size_field,
+	sfixn num_chunks,
 	sfixn deg_poly,
 	sfixn* irred_poly,
 	sfixn* mask, 
@@ -200,8 +200,7 @@ __global__ void cudaCreateExpTreeBNKernel(
     if( thid < length_exp_tree/2 ) {
 
 	    extern __shared__ sfixn* shared;
-
-		sfixn num_chunks = getNumberChunks(size_field);
+;
 		sfixn *tmp = &shared[thid * num_chunks];			
 
 		// Fill res with x (Bsp size_field = 3: [x0, x1, x2, x0, x1, x2, ...])
