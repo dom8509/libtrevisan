@@ -24,6 +24,7 @@
 #include<cstddef>
 #include<stdlib.h>
 #include<RInside.h>
+#include<R.h>
 #include "timing.h"
 #include "utils.hpp"
 #include "1bitext_xor.h"
@@ -45,11 +46,12 @@ void bitext_xor::compute_l() {
 	SEXP ans;
 	stringstream call;
 
-	call << "do.opt.xor(" << pp.alpha << ", " << mu << ", " << r << ", "
-	     << pp.n << ", " << pp.eps << ")";
+	call << "do.opt.xor(" << pp.alpha << ", " << mu << ", " << r << ", " << pp.n << ", " << pp.eps << ")";
 
 	r_interp->parse_eval(call.str(), ans);
+
 	l = Rcpp::as<vertex_t>(ans);
+
 }
 
 uint64_t bitext_xor::compute_k() {

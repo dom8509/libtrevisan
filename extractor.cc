@@ -33,7 +33,7 @@
 #include "prng.hpp"
 #include <tbb/tbb.h>
 #include <tbb/task_scheduler_init.h>
-#include <RInside.h>
+//#include <RInside.h>
 
 using namespace TCLAP;
 using namespace std;
@@ -278,7 +278,7 @@ void parse_cmdline(struct params &params, int argc, char **argv) {
 						  "block weak design (gf2x, gfp, aot)",
 						  false, "gf2x", "string");
 		ValueArg<string> bitextArg("x", "bitext",
-					    "Bit extractor construction (lu, xor, rsh)",
+					    "Bit extractor construction (lu, xor, rsh, rsh_cuda)",
 					    false, "xor", "string");
 		ValueArg<double> alphaArg("a", "alpha",
 					  "Source entropy factor alpha (0 < alpha < 1)",
@@ -605,6 +605,12 @@ int dispatch(struct params &params) {
 		bext = btx_rsh;
 		break;
 	}
+	case bext_type::RSH_CUDA: {
+		bitext_rsh_cuda *btx_rsh_cuda = new bitext_rsh_cuda(r_interp);
+		btx_rsh_cuda->set_input_data(global_rand, params.pp);
+		bext = btx_rsh_cuda;
+		break;
+	}
 	default:
 		cerr << "Internal error: Unknown 1-bit extractor requested" << endl;
 		exit(-1);
@@ -613,7 +619,6 @@ int dispatch(struct params &params) {
 	if (params.wdt == wd_type::BLOCK) {
 		weakdes *sub_wd;
 		alloc_init_weakdes(params.basic_wdt, &sub_wd, bext, params);
-
 		wd = new weakdes_block;
 		init_primitives(dynamic_cast<weakdes_block*>(wd), sub_wd, bext, params);
 	} else {
@@ -639,7 +644,6 @@ int dispatch(struct params &params) {
 			exit(-1);
 		}
 	}
-
 	// Finally, call the trevisan extractor proper
 	trevisan_dispatcher(wd, bext, params);
 

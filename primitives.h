@@ -24,6 +24,7 @@
 #include "1bitext_expander.h"
 #include "1bitext_xor.h"
 #include "1bitext_rsh.h"
+#include "1bitext_rsh_cuda.h"
 #include "weakdes_gf2x.h"
 #include "weakdes_gfp.h"
 #include "weakdes_block.h"
@@ -31,7 +32,7 @@
 #include "weakdes_aot.h"
 
 enum class wd_type { GF2X, GFP, BLOCK, AOT }; // Available weak designs
-enum class bext_type { LU, XOR, RSH };   // Available one-bit extractors
+enum class bext_type { LU, XOR, RSH, RSH_CUDA };   // Available one-bit extractors
 
 // Map the weak design to the overlap parameter
 // NOTE: While the aot weak design could have a different r than 2e, this

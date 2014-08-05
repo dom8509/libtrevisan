@@ -1,5 +1,5 @@
 # Configurable settings
-OPTIMISE=-O3
+OPTIMISE=-O3 -g
 #DEBUG=-ggdb # -Wall -Wextra -Weffc++
 #VARIANTS=-DEXPENSIVE_SANITY_CHECKS
 #VARIANTS+=-DWEAKDES_TIMING
@@ -7,7 +7,7 @@ OPTIMISE=-O3
 
 # Platform and configuration specific optimisations
 HAVE_SSE4=y
-HAVE_GF2X=n
+HAVE_GF2X=y
 
 USE_NTL=n
 USE_CUDA=y
@@ -15,7 +15,7 @@ USE_CUDA=y
 ###### Nothing user-configurable below here ########
 .PHONY: all clean paper src-pdf figures notes
 all: extractor
-BITEXTS = 1bitext_xor.o 1bitext_expander.o 1bitext_rsh.o
+BITEXTS = 1bitext_xor.o 1bitext_expander.o 1bitext_rsh.o 1bitext_rsh_cuda.o
 WDS = weakdes_gf2x.o weakdes_gfp.o weakdes_aot.o weakdes_block.o
 
 objects = ${BITEXTS} ${WDS} timing.o primitives.o ossl_locking.o \
@@ -28,11 +28,15 @@ all.objects = $(objects) $(objects.ext) $(objects.r)
 # we do not have to update it manually
 headers = 1bitext.h debug.h timing.h weakdes_gf2x.h weakdes_gfp.h weakdes_block.h \
 	  utils.hpp weakdes.h bitfield.hpp
+
 platform=$(shell uname)
+machine=$(shell uname -n)
+
 INCDIRS=-I/opt/local/include
 # INCDIRS+=-I/Users/wolfgang/src/openssl-1.0.1c/include
 INCDIRS+=-I/usr/local/lib/R/site-library/RInside/include -I/usr/local/lib/R/site-library/Rcpp/include -I/usr/share/R/include -I/usr/local/include
-LIBDIRS=-L/opt/local/lib -L/usr/local/lib
+#LIBDIRS=-L/opt/local/lib -L/usr/local/lib
+
 CXXFLAGS=$(OPTIMISE) $(OPENMP) $(DEBUG) $(VARIANTS) $(INCDIRS)
 ifeq ($(HAVE_SSE4),y)
 CXXFLAGS+=-msse4.2 -DHAVE_SSE4
@@ -44,20 +48,26 @@ LIBS+=-lgf2x
 endif
 
 ifeq ($(platform),Linux)
-CXXFLAGS+=-std=gnu++0x
+CXXFLAGS+=-std=c++11
 LIBS+=-lrt -lntl
 else
 CXXFLAGS+=-std=c++11
 CXX=g++-mp-4.7
 endif
 
-ifeq ($(USE),y)
+ifeq ($(machine),rfhinf064)
+LIBDIRS+=-L$(HOME)/sw/lib -L/usr/local/lib/R/site-library/RInside/lib -L/usr/local/lib/R/site-library/Rcpp/libs
+endif
+
+ifeq ($(USE_NTL),y)
 CXXFLAGS+=-DUSE_NTL
-else ifeq ($(USE_CUDA),y)
-LIBS+=-l:cuda/libtrevisancuda.a
-CXXFLAGS+=-DUSE_CUDA -DLINUXINTEL64
 else
 CXXFLAGS+=-DUSE_OSSL
+endif
+
+ifeq ($(USE_CUDA),y)
+LIBS+=-l:cuda/libtrevisancuda.a
+CXXFLAGS+=-DUSE_CUDA -DLINUXINTEL64
 endif
 
 # Cache the flags derived from R because they do not change across make invocations
@@ -137,4 +147,4 @@ clean:
 	@rm -f *.o weakdes_test 1bitext_test extractor
 	@rm -rf generated/*
 	@rm -f .rldflags .rcxxflags
-	@$(MAKE) clean -C paper
+	#@$(MAKE) clean -C paper

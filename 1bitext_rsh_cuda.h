@@ -17,26 +17,28 @@
    You should have received a copy of the GNU General Public License
    along with libtrevisan. If not, see <http://www.gnu.org/licenses/>. */
 
-#ifndef ONE_BITEXT_RSH_H
-#define ONE_BITEXT_RSH_H
+#ifndef ONE_BITEXT_RSH_CUDA_H
+#define ONE_BITEXT_RSH_CUDA_H
 
 #include "1bitext.h"
 #include "bitfield.hpp"
-#include<vector>
-#ifdef USE_NTL
-#include<NTL/GF2EX.h>
-#else
-#include<openssl/bn.h>
-#endif
+#include <vector>
+#include <openssl/bn.h>
 
-#ifdef USE_NTL
-NTL_CLIENT
-#endif
+#include "cuda/libtrevisancuda.h"
 
-class bitext_rsh : public bitext {
+
+class bitext_rsh_cuda : public bitext {
+private:
+	sfixn* coeffs;
+	sfixn* irred_poly; // The irrep is either a trinomial or pentanomial
+
 public:
-	bitext_rsh(R_interp *r_interp) : bitext(r_interp) { };
-	~bitext_rsh();
+	bitext_rsh_cuda(R_interp *r_interp) : bitext(r_interp) {
+		irred_poly = NULL;
+		coeffs = NULL;
+	};
+	~bitext_rsh_cuda();
 
 	void set_input_data(void *global_rand, struct phys_params &pp) override {
 		bitext::set_input_data(global_rand, pp);
@@ -64,20 +66,10 @@ private:
 
 	typedef uint64_t idx_t; // Index type for the bit field
 
-#ifdef USE_NTL
-	GF2EX poly;
-	GF2X irred_poly;
-	typedef _ntl_ulong chunk_t; // Chunk type for the bitfield
-	typedef _ntl_ulong data_t;  // Internal library type to store GF2m elements
-#else
-	std::vector<BIGNUM*> coeffs;
-	int irred_poly[5]; // The irrep is either a trinomial or pentanomial
-	BIGNUM *horner_poly_gf2n(BIGNUM *x);
-
 	// TODO: Determine if smaller index types cause any significant speedup
 	typedef uint64_t chunk_t;
 	typedef BN_ULONG data_t;
-#endif
+
 
 	bitfield<chunk_t, idx_t> b;
 };

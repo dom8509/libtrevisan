@@ -33,6 +33,9 @@ bext_type get_bitext(const string &bx) {
 	if (bx == "rsh")
 		return bext_type::RSH;
 
+	if (bx == "rsh_cuda")
+		return bext_type::RSH_CUDA;
+
 	cerr << "Please specify a valid bit extractor construction!" << endl;
 	exit(-1);
 }

@@ -22,17 +22,22 @@
 #ifdef USE_NTL
 #include <NTL/GF2X.h>
 NTL_CLIENT
-#elif USE_CUDA
-#include "cuda/libtrevisancuda.h"
 #else
 #include <openssl/bn.h>
 #endif
 
+#ifdef USE_CUDA
+#include "cuda/libtrevisancuda.h"
+#endif
+
 #ifdef USE_NTL
 void set_irrep(GF2X &P, unsigned n);
-#elif USE_CUDA
-void set_irrep_cuda(sfixn p[], unsigned n);
 #else
 void set_irrep(int p[], unsigned n);
 #endif
+
+#ifdef USE_CUDA
+void set_irrep_cuda(sfixn p[], unsigned n);
+#endif
+
 #endif
