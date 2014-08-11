@@ -91,4 +91,18 @@ OutIter copy_container(const C& c, OutIter result) {
 	return std::copy(c.begin(), c.end(), result);
 }
 
+template<class T>
+void printbincharpad(T* ca, unsigned int n)
+{
+	for(int j=0; j<n; j++) {
+		T c = ca[j];
+	    for (int i = sizeof(T)*8-1; i >= 0; --i)
+	    {
+	        putchar( (c & (1 << i)) ? '1' : '0' );
+	    }
+	    putchar(' ');
+	}
+	putchar('\n');
+}
+
 #endif

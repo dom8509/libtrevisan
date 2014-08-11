@@ -25,19 +25,15 @@
 #include <vector>
 #include <openssl/bn.h>
 
-#include "cuda/libtrevisancuda.h"
+#include "cuda/PolyEvalGF2nBN.cuh"
 
 
 class bitext_rsh_cuda : public bitext {
-private:
-	sfixn* coeffs;
-	sfixn* irred_poly; // The irrep is either a trinomial or pentanomial
-
 public:
-	bitext_rsh_cuda(R_interp *r_interp) : bitext(r_interp) {
-		irred_poly = NULL;
-		coeffs = NULL;
-	};
+	bitext_rsh_cuda(R_interp *r_interp) 
+	: bitext(r_interp)
+	, irred_poly(NULL)
+	, coeffs(NULL) {}
 	~bitext_rsh_cuda();
 
 	void set_input_data(void *global_rand, struct phys_params &pp) override {
@@ -67,11 +63,12 @@ private:
 	typedef uint64_t idx_t; // Index type for the bit field
 
 	// TODO: Determine if smaller index types cause any significant speedup
-	typedef uint64_t chunk_t;
-	typedef BN_ULONG data_t;
-
+	typedef sfixn chunk_t;
 
 	bitfield<chunk_t, idx_t> b;
+
+	sfixn* coeffs;
+	sfixn* irred_poly; // The irrep is either a trinomial or pentanomial
 };
 
 #endif

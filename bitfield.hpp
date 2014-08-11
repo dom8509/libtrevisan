@@ -145,6 +145,111 @@ public:
 		} 
 	};
 
+	// Caller is responsible to provide enough storage space in res
+	// Select bit range [start, end]
+	// NOTE: Bit indices are, as usual, zero-based
+	void get_bit_range_pad_right(I start, I end, C *res) {
+#ifdef EXPENSIVE_SANITY_CHECKS
+		if (end > n || start > n || start >= end) {
+			// TODO: Throw an exception instead
+			std::cerr << "Internal error: Bit index bogous" << std::endl;
+			std::cerr << "(start=" << start << ", end=" << end
+				  << ", n=" << n << ")" << std::endl;
+			std::exit(-1);
+		}
+#endif
+
+		memset(res, 0, ceil(((double)(end - start + 1))/8));
+		// Compute chain elements and bit within this element for the
+		// start and end positions
+		I start_chunk = start/bits_per_type;
+		I end_chunk = end/bits_per_type;
+
+		unsigned short end_bit = end % bits_per_type;;
+		unsigned short start_bit;
+
+		I dest_chunk = ceil(((double)(end - start + 1))/8);
+		C chunk;
+		C mask;
+
+		if (start_chunk == end_chunk)
+			start_bit = start_bit % bits_per_type;
+		else
+			start_bit = 0;
+
+		mask = compute_mask(start_bit, end_bit);
+		res[dest_chunk] = (data[end_chunk] & mask) >> (bits_per_type - end_bit);
+
+		if (start_chunk == end_chunk)
+			return;
+
+		I dest_end_bit = end_bit;
+		if (dest_end_bit == bits_per_type) {
+			dest_chunk--;
+			dest_end_bit = 0;
+		}
+
+		I dest_bits;
+
+		for (I curr_chunk = end_chunk+1; curr_chunk > 0; --curr_chunk) {
+			// For the inner chunks, we can always select the full chunk from
+			// the input data, but need to split it across the output
+			// data field
+			chunk = data[curr_chunk];
+
+			// How many bits remain in the destination chunk
+			dest_bits = bits_per_type - dest_end_bit;
+
+			// Fill up the current destination chunk
+			mask = compute_mask(dest_end_bit, bits_per_type - 1);
+			res[dest_chunk] |= ((chunk & mask) << dest_end_bit);
+			--dest_chunk;
+
+			// ... and fill the next destination chunk as far as
+			// possible unless the previous chunk was completely
+			// drained and there is nothing left for the new chunk
+			if (dest_bits != bits_per_type) {
+				mask = compute_mask(0, dest_end_bit);
+				res[dest_chunk] = (chunk & mask) >> dest_bits;
+			}
+
+			// Compute new starting position in the destination chunk
+			dest_end_bit = bits_per_type - dest_bits;
+		}
+
+		start_bit = start % bits_per_type;
+		dest_bits =  bits_per_type - dest_end_bit;
+		
+		mask = compute_mask(start_bit, bits_per_type - 1);
+		chunk = data[0] & mask;
+
+#ifdef EXPENSIVE_SANITY_CHECKS
+		if (debug_level >= EXCESSIVE_INFO) {
+			std::cerr << "start_bit: " << start_bit << ", dest_bits: " << dest_bits
+				  << ", mask: " << std::bitset<32>(mask) << ", end_chunk: "
+				  << end_chunk << std::endl;
+			std::cerr << "data[0]: 		 " << std::bitset<32>(data[0])
+				  << std::endl;
+			std::cerr << "masked data:   " << std::bitset<32>(chunk)
+				  << std::endl;
+			std::cerr << "dest_end_bit:  " << dest_end_bit << std::endl;
+		}
+#endif
+		// Any excess bits that do not fit into the current result chunk
+		// are shifted out to the left here
+		res[dest_chunk] |= (chunk << dest_end_bit);
+
+		if (bits_per_type - (start + 1) > dest_bits) {
+			// We need to split the final chunk contribution
+			// across two result chunks
+			--dest_chunk;
+
+			// Shift out the already consumed bits to the right,
+			// and include the remaining bits into the final result chunk
+			res[dest_chunk] = (chunk >> dest_bits);
+		} 
+	};
+
 	inline bool get_bit(I i) {
 #ifdef EXPENSIVE_SANITY_CHECKS
 		if (i > n) {

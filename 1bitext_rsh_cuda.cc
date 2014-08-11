@@ -64,8 +64,7 @@ vertex_t bitext_rsh_cuda::num_random_bits() {
 	// divisible into two parts, we round the amount up so that it's
 	// an even multiple of 8, i.e., the number of bits per char.
 
-	uint64_t l_rounded = l + (8-l%8);
-	return 2*l_rounded;
+	return 2*l;
 }
 
 uint64_t bitext_rsh_cuda::compute_k() {
@@ -77,20 +76,20 @@ void bitext_rsh_cuda::compute_r_l() {
 	l = ceil(log2((long double)pp.n) + 2*log2(2/pp.eps));
 	r = ceil(pp.n/l);
 
-	uint64_t l_rounded = l + (8-l%8); // See comment in num_random_bits
-	chars_per_half = l_rounded/BITS_PER_TYPE(char);
+	chars_per_half = l/BITS_PER_TYPE(char);
 
 	if (debug_level >= RESULTS) {
 		cerr << "RSH EXT: eps: " << pp.eps << ", n: " << pp.n << endl;
 		cerr << "RSH extractor: Computed l (Galois field order):" << l 
 		     << ", r (polynomial degree) " << r << endl;
 		cerr << "Number of char instances in half of initial randomness: "
-		     << chars_per_half << "(l_rounded=" << l_rounded << ")" << endl;
+		     << chars_per_half << ")" << endl;
 	}
 
 	if(irred_poly)
 		delete [] irred_poly;
-	irred_poly = new sfixn[(l-1)/SIZE_CHUNK+1];
+	uint64_t chunks_per_elems = ceil((l+1)/(long double)BITS_PER_TYPE(chunk_t));
+	irred_poly = new sfixn[chunks_per_elems];
 	set_irrep_cuda(irred_poly, l);
 	
 	if (debug_level >= INFO) {
@@ -111,15 +110,20 @@ void bitext_rsh_cuda::create_coefficients() {
 
 	b.set_raw_data(global_rand, pp.n);
 	
-	// TODO: Some padding may need to be required
-	uint64_t elems_per_coeff = ceil(l/(long double)BITS_PER_TYPE(chunk_t));
+	// coeffs have l plus one bits one bit for the additional carry bit
+	uint64_t elems_per_coeff = ceil((l+1)/(long double)BITS_PER_TYPE(chunk_t));
 	vector<chunk_t> vec(elems_per_coeff);
 
+	if(coeffs)
+		delete [] coeffs;
+	coeffs = new sfixn[elems_per_coeff*r];
 
-	for (uint64_t i = 0; i < r; i++) {
-		b.get_bit_range(i*l, (i+1)*l-1, &vec[0]);
+	for (uint64_t i = 0; i < r; ++i) {
+		b.get_bit_range_pad_right(i*l, (i+1)*l-1, &vec[0]);
 
-
+		for( uint64_t j = 0; j < elems_per_coeff; ++j ) {
+			coeffs[i*elems_per_coeff+j] = vec[j];
+		}
 	}
 }
 
@@ -130,37 +134,38 @@ bool bitext_rsh_cuda::extract(void *inital_rand) {
 	// Select the first l bits from the initial randomness,
 	// initialise an element of the finite field with them, and
 	// evaluate the polynomial on the value
-	sfixn  x[chars_per_half*SIZE_CHUNK/SIZE_BYTE];
-	BIGNUM *rs_res = BN_new();
+	uint64_t chunks_per_elems = ceil((l+1)/(long double)BITS_PER_TYPE(chunk_t));
+	vector<chunk_t> x(chunks_per_elems);
+	vector<chunk_t> rs_res(chunks_per_elems);
 
-	// Hadamard part
-	// Take the second l bits of randomness, compute a logical AND with the result,
-	// and compute the parity
-	data_t *data;
-	idx_t data_len;
+	// TODO: warum krieg ich hier l bits wenn l doch der Grad des irreduziblen Polynoms ist???
+	bitfield<chunk_t, idx_t> ir((chunk_t *)inital_rand, l);
+	vector<chunk_t> first_half(chunks_per_elems);
+	ir.get_bit_range_pad_right(0, l, &first_half[0]);
+	std::copy(std::begin(first_half), std::end(first_half), std::begin(x));
 
-	data = reinterpret_cast<BN_ULONG*>(rs_res->d);
-	data_len = rs_res->dmax;
-
+	// Evaluate the polynomial
+	// TODO: mask muss erstellt werden
+	evaluateGF2nPolyBN(coeffs, &x[0], l, r-1, irred_poly, NULL, &rs_res[0]);
 
 	// pointer vom Typ data_t, der auf den Anfang der zweiten Hälfte
 	// des Seeds zeigt
-	data_t *seed_half = reinterpret_cast<data_t*>(
-		reinterpret_cast<unsigned char*>(global_rand) + chars_per_half);
+	chunk_t *seed_half = reinterpret_cast<chunk_t*>(
+		reinterpret_cast<unsigned char*>(inital_rand) + chars_per_half);
 	bool parity = 0;
 	unsigned short bitcnt;
-	for (idx_t count = 0; count < data_len; count++) {
+	for (idx_t count = 0; count < chunks_per_elems; ++count) {
 		// data wird mit zweiter Seedhälfte undiert
-		*(data+count) &= *(seed_half + count);
+		rs_res[count] &= *(seed_half + count);
 		// If an even number of bits is set in the current subset,
 		// the global parity is XORed with one.
 		// TODO: Ensure that this is really alright (does always seem
 		// to end up in the != case).
 #ifdef HAVE_SSE4
-		bitcnt = _mm_popcnt_u64(*(data+count));
+		bitcnt = _mm_popcnt_u64(rs_res[count]);
 #else
 		// Gibt die Anzahl der Einsen zurück
-		bitcnt = __builtin_popcountll(*(data+count));
+		bitcnt = __builtin_popcountll(rs_res[count]);
 #endif
 		// Check if the bitcount is divisible by two (without using
 		// a modulo division to speed the test up)
@@ -168,8 +173,6 @@ bool bitext_rsh_cuda::extract(void *inital_rand) {
 			parity ^= 1;
 		}
 	}
-
-	BN_free(rs_res);
 
 	return parity;
 }

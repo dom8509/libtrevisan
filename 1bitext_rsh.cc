@@ -57,10 +57,12 @@ using namespace std;
 // why we keep the code around.
 
 bitext_rsh::~bitext_rsh() {
+#ifndef USE_NTL
 	if (global_rand != nullptr) {
 		for (auto bignum : coeffs)
 			BN_free(bignum);
 	}
+#endif
 }
 
 vertex_t bitext_rsh::num_random_bits() {
@@ -193,7 +195,7 @@ bool bitext_rsh::extract(void *inital_rand) {
 #ifdef USE_NTL
 	GF2Es val;
 	// Assign l bits to val, the parameter for the polynomial
-	GF2XFromBytes(val.LoopHole(), global_rand, chars_per_half);
+	GF2XFromBytes(val.LoopHole(), reinterpret_cast<unsigned char*>(inital_rand), chars_per_half);
 
 	// ... and evaluate the polynomial
 	GF2E rs_res;
@@ -201,7 +203,7 @@ bool bitext_rsh::extract(void *inital_rand) {
 #else
 	BIGNUM *val = BN_new();
 	BIGNUM *rs_res = BN_new();
-	BN_bin2bn(reinterpret_cast<unsigned char*>(global_rand), chars_per_half, val);
+	BN_bin2bn(reinterpret_cast<unsigned char*>(inital_rand), chars_per_half, val);
 
 	rs_res = horner_poly_gf2n(val);
 	BN_free(val);
@@ -221,7 +223,7 @@ bool bitext_rsh::extract(void *inital_rand) {
 #endif
 
 	data_t *seed_half = reinterpret_cast<data_t*>(
-		reinterpret_cast<unsigned char*>(global_rand) + chars_per_half);
+		reinterpret_cast<unsigned char*>(inital_rand) + chars_per_half);
 	bool parity = 0;
 	unsigned short bitcnt;
 	for (idx_t count = 0; count < data_len; count++) {

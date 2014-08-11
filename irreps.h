@@ -27,7 +27,7 @@ NTL_CLIENT
 #endif
 
 #ifdef USE_CUDA
-#include "cuda/libtrevisancuda.h"
+#include "cuda/PolyEvalGF2nBN.cuh"
 #endif
 
 #ifdef USE_NTL
