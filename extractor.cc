@@ -620,12 +620,14 @@ int dispatch(struct params &params) {
 		bext = btx_rsh;
 		break;
 	}
+#ifdef USE_CUDA
 	case bext_type::RSH_CUDA: {
 		bitext_rsh_cuda *btx_rsh_cuda = new bitext_rsh_cuda(r_interp);
 		btx_rsh_cuda->set_input_data(global_rand, params.pp);
 		bext = btx_rsh_cuda;
 		break;
 	}
+#endif
 	default:
 		cerr << "Internal error: Unknown 1-bit extractor requested" << endl;
 		exit(-1);

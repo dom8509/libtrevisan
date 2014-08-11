@@ -24,7 +24,11 @@
 #include "1bitext_expander.h"
 #include "1bitext_xor.h"
 #include "1bitext_rsh.h"
+
+#ifdef USE_CUDA
 #include "1bitext_rsh_cuda.h"
+#endif
+
 #include "weakdes_gf2x.h"
 #include "weakdes_gfp.h"
 #include "weakdes_block.h"

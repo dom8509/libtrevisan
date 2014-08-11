@@ -6,17 +6,21 @@ OPTIMISE=-O3 -g
 #VARIANTS+=-DUSE_NTL
 
 # Platform and configuration specific optimisations
-HAVE_SSE4=y
-HAVE_GF2X=y
+HAVE_SSE4=n
+HAVE_GF2X=n
 
 USE_NTL=n
-USE_CUDA=y
+USE_CUDA=n
 
 ###### Nothing user-configurable below here ########
 .PHONY: all clean paper src-pdf figures notes
 all: extractor
-BITEXTS = 1bitext_xor.o 1bitext_expander.o 1bitext_rsh.o 1bitext_rsh_cuda.o
+BITEXTS = 1bitext_xor.o 1bitext_expander.o 1bitext_rsh.o
 WDS = weakdes_gf2x.o weakdes_gfp.o weakdes_aot.o weakdes_block.o
+
+ifeq ($(USE_CUDA),y)
+BITEXTS += 1bitext_rs_cuda.o
+endif
 
 objects = ${BITEXTS} ${WDS} timing.o primitives.o ossl_locking.o \
 	  blockdes_params.o R_interp.o
