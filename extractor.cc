@@ -675,6 +675,7 @@ int dispatch(struct params &params) {
 }
 
 int main(int argc, char** argv) {
+
 	struct params params;
 	parse_cmdline(params, argc, argv);
 	int ret = dispatch(params);
