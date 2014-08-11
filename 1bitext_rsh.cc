@@ -133,7 +133,7 @@ BIGNUM *bitext_rsh::horner_poly_gf2n(BIGNUM *x) {
 	BN_CTX *ctx = BN_CTX_new();
 
 	for(size_t i = 0; i < coeffs.size(); i++) {
-		BN_GF2m_mod_mul_arr(&tmp, res, x, reinterpret_cast<const unsigned int*>(irred_poly), ctx);
+		BN_GF2m_mod_mul_arr(&tmp, res, x, reinterpret_cast<const int*>(irred_poly), ctx);
 		BN_GF2m_add(res, &tmp, coeffs[i]);
 	}
 
