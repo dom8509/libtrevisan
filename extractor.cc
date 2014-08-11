@@ -127,6 +127,7 @@ inline bool trevisan_extract(uint64_t i, vector<uint64_t> &indices,
 				(1 << (i % BITS_PER_TYPE(int)));
 		}
 	}
+
 }
 
 void trevisan_dispatcher(class weakdes *wd, class bitext *bext, params &params) {
@@ -218,6 +219,7 @@ void trevisan_dispatcher(class weakdes *wd, class bitext *bext, params &params) 
 		     [bext, wd, t, extracted_rand, num_rand_bits, offset,
 		      &init_rand_bf, &params, &wd_file_lock]
 		     (const tbb::blocked_range<uint64_t>& range) {
+
 			     vector<uint64_t> indices;
 			     vector<unsigned int> y_S_i;
 
@@ -254,6 +256,13 @@ void trevisan_dispatcher(class weakdes *wd, class bitext *bext, params &params) 
 	if (bitext_stat_file) {
 	  bitext_stat_file->close();
 	  wd_stat_file->close();
+	}
+
+	if (params.extRand_file != "") {
+		ofstream fHandle;
+		fHandle.open(params.extRand_file.c_str(), ios::out | ios::trunc | ios::binary);
+		fHandle.write((char*)extracted_rand, params.pp.m);
+		fHandle.close();
 	}
 
 	// TODO: Save the extracted randomness to a file
@@ -326,6 +335,11 @@ void parse_cmdline(struct params &params, int argc, char **argv) {
 						"File to save/load the weak design",
 						false, "", "string");
 		cmd.add(weakdesFileArg);
+
+		ValueArg<string> saveExtractedRandomnessArg("", "extRand-file",
+						  "File where extracted Randomness is stored ",
+						  false, "", "string");
+		cmd.add(saveExtractedRandomnessArg);
 
 #ifndef NO_DEBUG
 		MultiSwitchArg debugArg ("d","debug",
@@ -409,6 +423,7 @@ void parse_cmdline(struct params &params, int argc, char **argv) {
 
 		params.skip_bitext = skipBitextArg.getValue();
 		params.wd_filename = weakdesFileArg.getValue();
+		params.extRand_file = saveExtractedRandomnessArg.getValue();
 		params.save_weakdes = false;
 
 		if (params.wdt == wd_type::AOT ||

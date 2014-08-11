@@ -44,6 +44,7 @@ struct params {
 	bool skip_bitext;      // Skip the bit-extraction step?
 	bool save_weakdes; // Save the weak design?
 	std::string wd_filename;
+	std::string extRand_file;
 	std::ofstream wd_out;
 
 	R_interp *R;
