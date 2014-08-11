@@ -10,14 +10,25 @@ AR=ar
 
 CCFLAGS=-DLINUXINTEL64 -arch=compute_35 -m64 -rdc=true
 
-all:  
-	nvcc -lib -DLINUXINTEL64 --cubin -arch=sm_35 -m64 -rdc=true $(SRC)
+
+all: lib
+	$(CC) -arch=compute_35 $(TARGET) -dlink -lcudadevrt -o gpuCode.o
 
 lib: $(TARGET)
+	
 
 $(TARGET): $(OBJ)
 	$(AR) -rcs $(TARGET) $(OBJ)
-	rm $<
+#	rm $<
 
 $(OBJ): $(SRC)
-	$(CC) $(CCFLAGS) -c -o $@ $<
+	$(CC) $(CCFLAGS) -dc -o $@ $<
+
+clean:
+	rm -f *.cubin
+	rm -f *.a
+	rm -f *.o
+
+in_one_step:  
+	nvcc -lib -DLINUXINTEL64 --cubin -arch=sm_35 -m64 -rdc=true $(SRC)
+
