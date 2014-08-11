@@ -19,7 +19,7 @@ BITEXTS = 1bitext_xor.o 1bitext_expander.o 1bitext_rsh.o
 WDS = weakdes_gf2x.o weakdes_gfp.o weakdes_aot.o weakdes_block.o
 
 ifeq ($(USE_CUDA),y)
-BITEXTS += 1bitext_rs_cuda.o
+BITEXTS += 1bitext_rsh_cuda.o
 endif
 
 objects = ${BITEXTS} ${WDS} timing.o primitives.o ossl_locking.o \
@@ -56,7 +56,7 @@ CXXFLAGS+=-std=c++11
 LIBS+=-lrt -lntl
 else
 CXXFLAGS+=-std=c++11
-CXX=g++-mp-4.7
+CXX=g++-4.7
 endif
 
 ifeq ($(machine),rfhinf064)
@@ -70,8 +70,9 @@ CXXFLAGS+=-DUSE_OSSL
 endif
 
 ifeq ($(USE_CUDA),y)
-LIBS+=-l:cuda/libtrevisancuda.a
+LIBS+=-L/opt/cuda-6.0/lib64 -lcudart -lcudadevrt -l:cuda/libtrevisancuda.a
 CXXFLAGS+=-DUSE_CUDA -DLINUXINTEL64
+all.objects+=cuda/gpuCode.o
 endif
 
 # Cache the flags derived from R because they do not change across make invocations
