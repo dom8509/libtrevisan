@@ -21,7 +21,7 @@ __host__ sfixn getNumberBlocksForSharedMem(sfixn sharedMemSize );
 /*
 	Kernel Functions
 */
-__global__ void cudaCreateExpTreeBNKernel(sfixn* x, sfixn num_chunks, sfixn deg_poly, sfixn* irred_poly, sfixn* mask, sfixn length_exp_tree, sfixn* res);
+__global__ void cudaCreateExpTreeBNKernel(sfixn* x, sfixn num_chunks, sfixn deg_poly, sfixn* irred_poly, sfixn* mask, sfixn length_exp_tree, sfixn* tmp, sfixn* res);
 __global__ void cudaMontgMulBNKernel(sfixn* values, sfixn* x_preCalc, sfixn num_values, sfixn num_chunks, sfixn* irred_poly, sfixn* res);
 __global__ void cudaBitSumBNKernel(sfixn* values, sfixn length_values, sfixn n);
 __global__ void cudaCopyBNKernel(sfixn* a, sfixn num_chunks_a, sfixn* b, sfixn num_chunks_b);

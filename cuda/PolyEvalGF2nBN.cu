@@ -2,6 +2,8 @@
 #include "PolyEvalGF2nBN.cuh"
 #undef INCLUDE_FROM_CUDA_FILE
 
+#include "CudaUtils.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 /*
 	Some constant memory variables
@@ -64,26 +66,27 @@ void evaluateGF2nPolyBN(
 	loadPoroperties();
 
 	// Define all device variables
-	sfixn *dx, *dCoeffs, *dIrred_poly, *dMask, *dTmp_Result;
+	sfixn *dx, *dCoeffs, *dIrred_poly, *dMask, *dTmp, *dTmp_Result;
 	
 	// Allocate the device variables
-	cudaMalloc((sfixn**)&dx, bytes_for_chunks);
-	cudaMalloc((sfixn**)&dCoeffs, width_binary_tree * bytes_for_chunks);
-	cudaMalloc((sfixn**)&dIrred_poly, bytes_for_chunks);
-	cudaMalloc((sfixn**)&dMask, bytes_for_chunks);
-	cudaMalloc((sfixn**)&dTmp_Result, width_binary_tree * bytes_for_chunks);
+	CudaSafeCall(cudaMalloc((sfixn**)&dx, bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&dCoeffs, width_binary_tree * bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&dIrred_poly, bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&dMask, bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&dTmp, width_binary_tree / 2 * bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&dTmp_Result, width_binary_tree * bytes_for_chunks));
 
 	sfixn hCoeffs[width_binary_tree*num_chunks*SIZE_CHUNK/SIZE_BYTE];
 	padWithZeros(coeffs, count_coeffs, num_chunks, hCoeffs, width_binary_tree);
 
 	// Copy host data to device
-	cudaMemcpy(dx, x, bytes_for_chunks, cudaMemcpyHostToDevice);
-	cudaMemcpy(dCoeffs, hCoeffs, width_binary_tree * bytes_for_chunks, cudaMemcpyHostToDevice);
-	cudaMemcpy(dIrred_poly, irred_poly, bytes_for_chunks, cudaMemcpyHostToDevice);
-	cudaMemcpy(dMask, mask, bytes_for_chunks, cudaMemcpyHostToDevice);
+	CudaSafeCall(cudaMemcpy(dx, x, bytes_for_chunks, cudaMemcpyHostToDevice));
+	CudaSafeCall(cudaMemcpy(dCoeffs, hCoeffs, width_binary_tree * bytes_for_chunks, cudaMemcpyHostToDevice));
+	CudaSafeCall(cudaMemcpy(dIrred_poly, irred_poly, bytes_for_chunks, cudaMemcpyHostToDevice));
+	CudaSafeCall(cudaMemcpy(dMask, mask, bytes_for_chunks, cudaMemcpyHostToDevice));
 
 	// Create all exponentiation from x^0 to x^deg_poly and store it in res 
-	cudaCreateExpTreeBNKernel<<<min(width_binary_tree/2, hMaxThreadsPerBlock), ceil((double)width_binary_tree/2/hMaxThreadsPerBlock), width_binary_tree/2*num_chunks>>>(dx, num_chunks, deg_poly, dIrred_poly, dMask, width_binary_tree, dTmp_Result);
+	cudaCreateExpTreeBNKernel<<<min(width_binary_tree/2, hMaxThreadsPerBlock), ceil((double)width_binary_tree/2/hMaxThreadsPerBlock)>>>(dx, num_chunks, deg_poly, dIrred_poly, dMask, width_binary_tree, dTmp, dTmp_Result);
 
 	// Multiply each coefficient with its related exponentiation of x 
 	// (coeff[0]*x^0, ..., coeff[deg_poly]*x^deg_poly) and store it in res
@@ -94,7 +97,7 @@ void evaluateGF2nPolyBN(
 
 	// Read the result from device
 	sfixn hTmp_Result[width_binary_tree * bytes_for_chunks];
-	cudaMemcpy(hTmp_Result, dTmp_Result, width_binary_tree * bytes_for_chunks, cudaMemcpyDeviceToHost);
+	CudaSafeCall(cudaMemcpy(hTmp_Result, dTmp_Result, width_binary_tree * bytes_for_chunks, cudaMemcpyDeviceToHost));
 
 	// Create result
 	for( sfixn i=0; i<num_chunks; ++i ) {
@@ -102,11 +105,12 @@ void evaluateGF2nPolyBN(
 	}
 
 	// Free all allocated device memory
-	cudaFree(dx);
-	cudaFree(dCoeffs);
-	cudaFree(dIrred_poly);
-	cudaFree(dMask);
-	cudaFree(dTmp_Result);
+	CudaSafeCall(cudaFree(dx));
+	CudaSafeCall(cudaFree(dCoeffs));
+	CudaSafeCall(cudaFree(dIrred_poly));
+	CudaSafeCall(cudaFree(dMask));
+	CudaSafeCall(cudaFree(dTmp));
+	CudaSafeCall(cudaFree(dTmp_Result));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -117,9 +121,9 @@ void evaluateGF2nPolyBN(
 __host__ void loadPoroperties() {
 
 	cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, 0);
-    cudaMemcpyToSymbol(&dMaxThreadsPerBlock, &deviceProp.maxThreadsPerBlock, sizeof(sfixn));
-	cudaMemcpyToSymbol(&dSharedMemPerBlock, &deviceProp.sharedMemPerBlock, sizeof(sfixn));
+	cudaGetDeviceProperties(&deviceProp, 0);
+	CudaSafeCall(cudaMemcpyToSymbol(dMaxThreadsPerBlock, &deviceProp.maxThreadsPerBlock, sizeof(sfixn), 0, cudaMemcpyHostToDevice));
+	CudaSafeCall(cudaMemcpyToSymbol(dSharedMemPerBlock, &deviceProp.sharedMemPerBlock, sizeof(sfixn)));
 
 	hMaxThreadsPerBlock = deviceProp.maxThreadsPerBlock;
 	hSharedMemPerBlock = deviceProp.sharedMemPerBlock;
@@ -193,6 +197,7 @@ __global__ void cudaCreateExpTreeBNKernel(
 	sfixn* irred_poly,
 	sfixn* mask, 
 	sfixn length_exp_tree,
+	sfixn* tmp,
 	sfixn* res) {
 
     sfixn thid = threadIdx.x * blockIdx.x;
@@ -201,7 +206,7 @@ __global__ void cudaCreateExpTreeBNKernel(
 
 	    extern __shared__ sfixn* shared;
 ;
-		sfixn *tmp = &shared[thid * num_chunks];			
+		sfixn *local_tmp = &tmp[thid * num_chunks];			
 
 		// Fill res with x (Bsp size_field = 3: [x0, x1, x2, x0, x1, x2, ...])
 		cudaExpandVecBNKernel<<<min(num_chunks*length_exp_tree, dMaxThreadsPerBlock), ceil((double)num_chunks*length_exp_tree/dMaxThreadsPerBlock)>>>(x, num_chunks, res, num_chunks*length_exp_tree);
@@ -239,9 +244,9 @@ __global__ void cudaCreateExpTreeBNKernel(
 				sfixn ai = (offset * (2*thid+1) - offset) * num_chunks;
 		 		sfixn bi = (offset * (2*thid+2) - offset) * num_chunks;
 
-		        cudaCopyBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&res[bi], num_chunks, tmp, num_chunks);
+		        cudaCopyBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&res[bi], num_chunks, local_tmp, num_chunks);
 		        cudaCopyBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&res[ai], num_chunks, &res[bi], num_chunks);
-		        cudaBitAddBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&res[ai], tmp, num_chunks);
+		        cudaBitAddBNKernel<<<min(num_chunks, dMaxThreadsPerBlock), ceil((double)num_chunks/dMaxThreadsPerBlock)>>>(&res[ai], local_tmp, num_chunks);
 		    }
 		}
 
