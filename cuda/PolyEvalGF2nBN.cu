@@ -140,7 +140,7 @@ void evaluateGF2nPolyBN(
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	num_threads = min(num_chunks*width_binary_tree, hMaxThreadsPerBlock);
 	num_blocks = ceil((double)num_chunks*width_binary_tree/hMaxThreadsPerBlock);
-	printf("Starting expand step...\n");
+	//printf("Starting expand step...\n");
 	cudaExpandVecBNKernel<<<num_blocks, num_threads>>>(dx, num_chunks, dTmp_Result, num_chunks*width_binary_tree);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
@@ -156,7 +156,7 @@ void evaluateGF2nPolyBN(
 	num_threads = min(width_binary_tree/2, hMaxThreadsPerBlock);
 	num_blocks = ceil((double)width_binary_tree/2/hMaxThreadsPerBlock);
 	// Calculate reduce step
-	printf("Starting reduce step...\n");
+	//printf("Starting reduce step...\n");
 	cudaPrefProdReduce<<<num_blocks, num_threads>>>(num_chunks, dIrred_poly, dMask, width_binary_tree, dTmp1, dTmp_Result);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
@@ -169,7 +169,7 @@ void evaluateGF2nPolyBN(
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// calculate down sweep step
-	printf("Starting down swep step...\n");
+	//printf("Starting down swep step...\n");
 	cudaPrefProdDownSweep<<<num_blocks, num_threads>>>(num_chunks, dIrred_poly, dMask, width_binary_tree, dTmp1, dTmp2, dTmp_Result);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
@@ -186,7 +186,7 @@ void evaluateGF2nPolyBN(
 	num_threads = min(width_binary_tree, hMaxThreadsPerBlock);
 	num_blocks = ceil((double)width_binary_tree/hMaxThreadsPerBlock);
 
-	printf("Starting prod step...\n");
+	//printf("Starting prod step...\n");
 	cudaMontgMulBNKernel<<<num_blocks, num_threads>>>(dCoeffs, dTmp_Result, width_binary_tree, num_chunks, dIrred_poly, dMask, dTmp_long, dTmp_Result);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
@@ -200,7 +200,7 @@ void evaluateGF2nPolyBN(
 	num_threads = min(width_binary_tree/2, hMaxThreadsPerBlock);
 	num_blocks = ceil((double)width_binary_tree/2/hMaxThreadsPerBlock);
 
-	printf("Starting sum step...\n");
+	//printf("Starting sum step...\n");
 	cudaBitSumBNKernel<<<num_blocks, num_threads>>>(dTmp_Result, num_chunks, width_binary_tree);
 	cudaDeviceSynchronize();
 
@@ -243,8 +243,6 @@ __host__ void loadPoroperties() {
 	cudaDeviceProp deviceProp;
 	cudaGetDeviceProperties(&deviceProp, 0);
 
-	printf("Max Threads per Block = %i\n", deviceProp.maxThreadsPerBlock);
-
 	CudaSafeCall(cudaMemcpyToSymbol(dMaxThreadsPerBlock, (const char *)&deviceProp.maxThreadsPerBlock, sizeof(sfixn), 0, cudaMemcpyHostToDevice));
 	CudaSafeCall(cudaMemcpyToSymbol(dSharedMemPerBlock, &deviceProp.sharedMemPerBlock, sizeof(sfixn)));
 
@@ -264,15 +262,10 @@ __host__ void padWithZeros(
 	sfixn* data_new, 
 	sfixn size_new ) {
 
-	printf("size old: %i\n", size_old);
-	printf("size new: %i\n", size_new);
-
 	for( sfixn i=size_new*num_chunks-1; i>=0; --i ) {
 		if( i >= size_new - size_old ) {
-			printf("data_new[%i] = data_old[%i]\n", i, i - (size_new - size_old));
 			data_new[i] = data_old[i - (size_new - size_old)];
 		} else {
-			printf("data_new[%i] = 0\n", i);
 			data_new[i] = 0;
 		}
 	}
@@ -328,28 +321,6 @@ __global__ void cudaPrefProdReduce(
 
     sfixn thid = (blockIdx.x * blockDim.x) + threadIdx.x;
 
-	if(thid == 100) {
-		printf("input tree: "); 
-		for( int j = 0; j<length_exp_tree; ++j ) {
-			printf("res[%i]: ", j); 
-			cudaPrintbincharpad(&res[j], num_chunks);
-		}
-	}
-
-	if( thid == 100 ) {	
-		printf("\n\n");
-		printf("Number chunks: %i\n", num_chunks);
-		printf("mask:\n");
-		cudaPrintbincharpad(mask, num_chunks);
-		printf("irred_poly:\n");
-		cudaPrintbincharpad(irred_poly, num_chunks);
-		printf("length_exp_tree: %i\n", length_exp_tree);
-		printf("tmp:\n");
-		cudaPrintbincharpad(tmp, num_chunks);
-		printf("res:\n");
-		cudaPrintbincharpad(res, num_chunks);
-	}
-
     if( thid < length_exp_tree/2 ) {
 
 		sfixn *local_tmp = &tmp[thid * num_chunks];			
@@ -377,14 +348,6 @@ __global__ void cudaPrefProdReduce(
 				__syncthreads();
 	 		}
 	 		__syncthreads();
-
-			if(thid == 100) {
-				printf("tree in iteration %i: \n", i); 
-				for( int j = 0; j<length_exp_tree; ++j ) {
-					printf("res[%i]: ", j); 
-					cudaPrintbincharpad(&res[j], num_chunks);
-				}
-			}
 
 	 		offset <<= 1;
 
@@ -422,27 +385,12 @@ __global__ void cudaPrefProdDownSweep(
 		sfixn *local_tmp1 = &tmp1[thid * num_chunks];
 		sfixn *local_tmp2 = &tmp2[thid * num_chunks];
 
-
-		if( thid == 100 ) {
-			printf("Leaves input: ");
-			for(int k=0; k<length_exp_tree; k++) {
-				printf("res[%i]:", k); cudaPrintbincharpad(&res[k], num_chunks);
-			}
-		}
-
 		num_threads = min(num_chunks, dMaxThreadsPerBlock);
 		num_blocks = ceil((double)num_chunks/dMaxThreadsPerBlock);
 		
 		if( thid == 0 ) {
 			cudaSet0Kernel<<<num_blocks, num_threads>>>(&local_tmp1[0], num_chunks);
 			cudaSet1Kernel<<<num_blocks, num_threads>>>(&res[0], num_chunks);
-		}
-
-		if( thid == 100 ) {
-			printf("Leaves after setting res[0] = 1: ");
-			for(int k=0; k<length_exp_tree; k++) {
-				printf("res[%i]:", k); cudaPrintbincharpad(&res[k], num_chunks);
-			}
 		}
 
 		sfixn offset = length_exp_tree;
@@ -468,12 +416,6 @@ __global__ void cudaPrefProdDownSweep(
 				cudaCopyBNKernel<<<num_blocks, num_threads>>>(&res[ai], num_chunks, &res[bi], num_chunks);
 				__syncthreads();
 
-				if( thid == 0 ) {
-					//printf("res[ai] (ai = %i): ", ai); cudaPrintbincharpad(&res[ai], num_chunks);
-					//printf("res[bi] (bi = %i): ", bi); cudaPrintbincharpad(&res[bi], num_chunks);
-				}
-				//cudaBitAddBNKernel<<<num_blocks, num_threads>>>(&res[ai], local_tmp1, num_chunks);
-
 				cudaMontgMulBN(
 					&res[ai], 
 					local_tmp1,
@@ -484,13 +426,6 @@ __global__ void cudaPrefProdDownSweep(
 					&res[ai]);
 				__syncthreads();
 
-				if(thid == 100) {
-					printf("Leaves in thread %i in iteration %i:\n", thid, i);
-					for(int k=0; k<length_exp_tree; k++) {
-						printf("res[%i]:", k); cudaPrintbincharpad(&res[k], num_chunks);
-					}
-					printf("used indices: ai = %i, bi = %i\n", ai, bi);
-				}
 				++i;
 		    }
 		}
@@ -592,10 +527,6 @@ __global__ void cudaCopyBNKernel( sfixn* a, sfixn num_chunks_a, sfixn* b, sfixn 
 
 	sfixn thid = (blockIdx.x * blockDim.x) + threadIdx.x;
 
-#ifdef CUDA_DEBUG_INFO	
-	printf("hi i'm cudacopybnkernel running thread %i in block %i = thread %i\n", threadidx.x, blockidx.x, thid);
-#endif
-
 	if( thid < num_chunks_b ) {
 		if( thid < num_chunks_a )
 			b[thid] = a[thid];
@@ -621,15 +552,15 @@ __global__ void cudaMontgMulBNKernel(
 
 	sfixn thid = (blockIdx.x * blockDim.x) + threadIdx.x;
 
-	if(thid == 0) {
-		printf("values: \n"); 
-		for(int i=0; i<num_values; ++i) {
-			printf("values[%i]: ", i); cudaPrintbincharpad(&values[i], num_chunks);
-		}
-		printf("x_preCalc: \n"); 
-		for(int i=0; i<num_values; ++i) {
-			printf("x_preCalc[%i]: ", i); cudaPrintbincharpad(&x_preCalc[i], num_chunks);
-		}
+	// if(thid == 0) {
+	// 	printf("values: \n"); 
+	// 	for(int i=0; i<num_values; ++i) {
+	// 		printf("values[%i]: ", i); cudaPrintbincharpad(&values[i], num_chunks);
+	// 	}
+	// 	printf("x_preCalc: \n"); 
+	// 	for(int i=0; i<num_values; ++i) {
+	// 		printf("x_preCalc[%i]: ", i); cudaPrintbincharpad(&x_preCalc[i], num_chunks);
+	// 	}
 	}
 
 	cudaMontgMulBN(
@@ -656,14 +587,6 @@ __global__ void cudaBitSumBNKernel(
 
 	int i = 0;
 
-	if(thid == 100) {
-		printf("input tree: \n"); 
-		for( int j = 0; j<n; ++j ) {
-			printf("values[%i]: ", j); 
-			cudaPrintbincharpad(&values[j], num_chunks);
-		}
-	}
-
 	if( thid < n/2 ) {
 		sfixn offset = 1;
 
@@ -680,14 +603,6 @@ __global__ void cudaBitSumBNKernel(
 				cudaBitAddBNKernel<<<num_blocks, num_threads>>>(&values[ai], &values[bi], num_chunks);
 
 				__syncthreads();
-
-				if(thid == 100) {
-					printf("tree in iteration %i: \n", i); 
-					for( int j = 0; j<n; ++j ) {
-						printf("values[%i]: ", j); 
-						cudaPrintbincharpad(&values[j], num_chunks);
-					}
-				}
 	 		}
 	 		++i;
 	 		offset <<= 1;
@@ -722,10 +637,6 @@ __global__ void cudaExpandVecBNKernel(
 __global__ void cudaSet0Kernel( sfixn* x, sfixn length ) {
 
 	sfixn thid = (blockIdx.x * blockDim.x) + threadIdx.x;
-
-#ifdef CUDA_DEBUG_INFO
-	printf("Hi I'm cudaSet0Kernel running thread %i in block %i = thread %i\n", threadIdx.x, blockIdx.x, thid);
-#endif
 
 	if( thid < length )
 		x[thid] = 0;
@@ -799,19 +710,19 @@ __device__ void cudaMontgMulBN(
 
 	int iteration = 0;
 
-	if( threadIdx.x == 100 ) {	
-		printf("thread 1 started...\n");
-		printf("a: "); cudaPrintbincharpad(a, num_chunks);
-		printf("b: "); cudaPrintbincharpad(b, num_chunks);
-		printf("res: "); cudaPrintbincharpad(res, num_chunks);
-		printf("tmp: "); cudaPrintbincharpad(tmp, num_chunks);
-		printf("mask: "); cudaPrintbincharpad(mask, num_chunks);
-		printf("irred_poly: "); cudaPrintbincharpad(irred_poly, num_chunks);
-		printf("dMaxThreadsPerBlock: %i\n", dMaxThreadsPerBlock);
-		printf("num_chunks: %i\n", num_chunks); 
-		printf("num blocks: %i\n", num_blocks);
-		printf("num threads: %i\n", num_threads);
-	}
+	// if( threadIdx.x == 100 ) {	
+	// 	printf("thread 1 started...\n");
+	// 	printf("a: "); cudaPrintbincharpad(a, num_chunks);
+	// 	printf("b: "); cudaPrintbincharpad(b, num_chunks);
+	// 	printf("res: "); cudaPrintbincharpad(res, num_chunks);
+	// 	printf("tmp: "); cudaPrintbincharpad(tmp, num_chunks);
+	// 	printf("mask: "); cudaPrintbincharpad(mask, num_chunks);
+	// 	printf("irred_poly: "); cudaPrintbincharpad(irred_poly, num_chunks);
+	// 	printf("dMaxThreadsPerBlock: %i\n", dMaxThreadsPerBlock);
+	// 	printf("num_chunks: %i\n", num_chunks); 
+	// 	printf("num blocks: %i\n", num_blocks);
+	// 	printf("num threads: %i\n", num_threads);
+	// }
 
 	bool hit = 0;
 
