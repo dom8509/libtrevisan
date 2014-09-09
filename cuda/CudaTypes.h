@@ -19,7 +19,7 @@ typedef unsigned long      uint32;
 
 #ifdef LINUXINTEL64
 #undef WINDOWS
-#warning "LINUXINTEL64 selected!!"
+//#warning "LINUXINTEL64 selected!!"
 typedef int            sfixn;
 typedef long           longfixnum;
 typedef unsigned int   usfixn;

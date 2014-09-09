@@ -63,11 +63,11 @@ private:
 	typedef uint64_t idx_t; // Index type for the bit field
 
 	// TODO: Determine if smaller index types cause any significant speedup
-	typedef sfixn chunk_t;
+	typedef ulongfixnum chunk_t;
 
 	bitfield<chunk_t, idx_t> b;
 
-	sfixn* coeffs;
+	chunk_t* coeffs;
 	sfixn* irred_poly; // The irrep is either a trinomial or pentanomial
 };
 

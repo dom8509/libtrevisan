@@ -113,13 +113,23 @@ void bitext_rsh_cuda::create_coefficients() {
 	// coeffs have l plus one bits one bit for the additional carry bit
 	uint64_t elems_per_coeff = ceil((l+1)/(long double)BITS_PER_TYPE(chunk_t));
 	vector<chunk_t> vec(elems_per_coeff);
+	vector<chunk_t> vec2(elems_per_coeff);
 
 	if(coeffs)
 		delete [] coeffs;
-	coeffs = new sfixn[elems_per_coeff*r];
+	coeffs = new chunk_t[elems_per_coeff*r];
 
 	for (uint64_t i = 0; i < r; ++i) {
-		b.get_bit_range_pad_right(i*l, (i+1)*l-1, &vec[0]);
+		unsigned char* foo = (unsigned char*)vec.data();
+		unsigned char* foo2 = (unsigned char*)vec2.data();
+		b.get_bit_range(i*l, (i+1)*l-1, &vec[0]);
+
+		// bits spiegeln
+		int lastByte = sizeof(chunk_t)*elems_per_coeff;
+		int currByte = lastByte;
+		for (int i=0;i<lastByte-1;i++) {
+			foo[--currByte] = (foo2[i] * 0x0202020202ULL & 0x010884422010ULL) % 1023;
+		}
 
 		for( uint64_t j = 0; j < elems_per_coeff; ++j ) {
 			coeffs[i*elems_per_coeff+j] = vec[j];
@@ -146,7 +156,7 @@ bool bitext_rsh_cuda::extract(void *inital_rand) {
 
 	// Evaluate the polynomial
 	// TODO: mask muss erstellt werden
-	evaluateGF2nPolyBN(coeffs, &x[0], l, r-1, irred_poly, NULL, &rs_res[0]);
+	evaluateGF2nPolyBN((sfixn*)coeffs, (sfixn*)&x[0], l*2, r-1, irred_poly, NULL, (sfixn*)&rs_res[0]);
 
 	// pointer vom Typ data_t, der auf den Anfang der zweiten Hälfte
 	// des Seeds zeigt

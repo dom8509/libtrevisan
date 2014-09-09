@@ -51,6 +51,9 @@ string bitext_to_string(bext_type bext) {
 	case bext_type::RSH:
 		return "Reed-Solomon-Hadamard";
 		break;
+	case bext_type::RSH_CUDA:
+		return "Reed-Solomon-Hadamard Cuda";
+		break;
 	default:
 		// Duh?!
 		cerr << "Internal error: Unknown bit extractor specified" << endl;
