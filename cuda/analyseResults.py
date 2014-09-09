@@ -25,16 +25,31 @@ def getWidthBinTree( n ):
 def calculatePythonResults( field, specParam ):
 
 	# calculate tree
-	resultReduceStep = parallelPrefProdReduce(field(specParam["x"][0]), getWidthBinTree(specParam["num_coeffs"][0]))
+	resultExpandStep = parallelExpandVec(field(specParam["x"][0]), getWidthBinTree(specParam["num_coeffs"][0]))
+	resultReduceStep = parallelPrefProdReduce(resultExpandStep)
 	resultDownSweepStep = parallelPrefProdDownSweep(resultReduceStep)
-	resultProdStep = parallelPrefProdMultiply(resultDownSweepStep, [field(x) for x in specParam["coeffs"]])
+	resultProdStep = parallelPrefProdMultiply(resultDownSweepStep, \
+		([field(0)] * (getWidthBinTree(specParam["num_coeffs"][0]) - specParam["num_coeffs"][0])) + \
+		[field(x) for x in specParam["coeffs"]])
 	resultSumStep = parallelPrefProdSum(resultProdStep)
 
 	# assign results
+	specParam["resultExpandStep"] = [int(str(x)) for x in resultExpandStep]
 	specParam["resultReduceStep"] = [int(str(x)) for x in resultReduceStep]
 	specParam["resultDownSweepStep"] = [int(str(x)) for x in resultDownSweepStep]
-	specParam["rsultProdStep"] = [int(str(x)) for x in resultProdStep]
-	specParam["resultSumStep"] = int(str(resultSumStep))
+	specParam["resultProdStep"] = [int(str(x)) for x in resultProdStep]
+	specParam["resultSumStep"] = [int(str(resultSumStep))]
+
+
+def printFailedResults( key, specValue, calcValue ):
+
+	print("\n")
+	print("-> Results for " + key)
+	print("specified:")
+	print(specValue)
+	print("calculated:")
+	print(calcValue)
+	print("\n")
 
 
 def compareResults( specParam, calcParam ):
@@ -51,6 +66,7 @@ def compareResults( specParam, calcParam ):
 			print("\033[92m" + "passed\n" + "\033[0m", end="")	
 		else:
 			print("\033[91m" + "FAILED!\n" + "\033[0m", end="")
+			printFailedResults(key, specParam[key], calcParam[key])
 
 
 def analyseResults( calcParam, verbose ):
@@ -62,6 +78,7 @@ def analyseResults( calcParam, verbose ):
 		"x" : rsh_test_parameters.get_rsh_test_parameter_x(), \
 		"irred_poly" : rsh_test_parameters.get_rsh_test_parameter_irred_poly(), \
 		"mask" : rsh_test_parameters.get_rsh_test_parameter_mask(), \
+		"resultExpandStep" : 0, \
 		"resultReduceStep" : 0, \
 		"resultDownSweepStep" : 0, \
 		"rsultProdStep" : 0, \
@@ -78,7 +95,7 @@ def analyseResults( calcParam, verbose ):
 		for key in specParam.keys():
 			print(key + ":")
 			print(specParam[key])
-			
+
 
 def main():
 

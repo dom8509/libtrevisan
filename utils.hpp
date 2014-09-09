@@ -4,12 +4,14 @@
 // don't use namespace std -- we may want to use this in code
 // where std is not imported into the main namespace
 
-#include<cstddef>
-#include<cassert>
-#include<cstdlib>
-#include<cmath> // floating point logarithm
-#include<iostream>
-#include<limits>
+#include <cstddef>
+#include <cassert>
+#include <cstdlib>
+#include <cmath> // floating point logarithm
+#include <iostream>
+#include <fstream>
+#include <limits>
+#include <bitset>
 
 #define BITS_PER_BYTE	8
 #define BITS_PER_TYPE(_type)	(sizeof(_type)*BITS_PER_BYTE)
@@ -96,13 +98,40 @@ void printbincharpad(T* ca, unsigned int n)
 {
 	for(int j=0; j<n; j++) {
 		T c = ca[j];
-	    for (int i = sizeof(T)*8-1; i >= 0; --i)
-	    {
-	        putchar( (c & (1 << i)) ? '1' : '0' );
-	    }
-	    putchar(' ');
+		for (int i = sizeof(T)*8-1; i >= 0; --i)
+		{
+			putchar( (c & (1 << i)) ? '1' : '0' );
+		}
+		putchar(' ');
 	}
 	putchar('\n');
+}
+
+template<class T>
+void printbin(T* ca, unsigned int num_chunks, unsigned int num_values)
+{
+	for(int k=0; k<num_values; k++) {
+		for(int j=0; j<num_chunks; j++) {
+			T c = ca[(k*num_chunks) + j];
+			for (int i = sizeof(T)*8-1; i >= 0; --i)
+			{
+				putchar( (c & (1 << i)) ? '1' : '0' );
+			}
+		}
+		putchar(' ');
+	}
+	putchar('\n');
+}
+
+template<class T>
+void printbinToFile(T* ca, unsigned int num_chunks, unsigned int num_values, std::ofstream& file)
+{
+	for(int k=0; k<num_values; k++) {
+		for(int j=0; j<num_chunks; j++) {
+			file << std::bitset<sizeof(T)*8>(ca[(k*num_chunks) + j]);
+		}
+		file << " ";
+	}
 }
 
 #endif

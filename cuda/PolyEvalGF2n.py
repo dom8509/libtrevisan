@@ -1,44 +1,46 @@
+import copy
 from GF2n import GF2n
 
 
-def expandVec( x, n ):
+def parallelExpandVec( x, n ):
 	return [x] * n
 
 
-def parallelPrefProdReduce( x, widthBinTree ):
-	
-	offset = 1
-	leaves = expandVec(x, widthBinTree)
+def parallelPrefProdReduce( leaves ):
 
-	i = widthBinTree >> 1
+	leavesOut = copy.deepcopy(leaves)
+	offset = 1
+
+	i = len(leavesOut) >> 1
 	while( i > 0 ):
 		for j in range(0, i):
-			leaves[(offset*(2*j + 1) - offset)] = \
-				leaves[(offset*(2*j + 1) - offset)] * leaves[(offset*(2*j + 2) - offset)]
+			leavesOut[(offset*(2*j + 1) - offset)] = \
+				leavesOut[(offset*(2*j + 1) - offset)] * leavesOut[(offset*(2*j + 2) - offset)]
 
 		i >>= 1
 		offset <<= 1
 
-	return leaves
+	return leavesOut
 
 
 def parallelPrefProdDownSweep( leaves ):
 
-	leaves[0] = (leaves[0].getField())(1)
+	leavesOut = copy.deepcopy(leaves)
+	leavesOut[0] = (leavesOut[0].getField())(1)
 
-	offset = len(leaves)
+	offset = len(leavesOut)
 	i = 1
-	while( i < len(leaves) ):
+	while( i < len(leavesOut) ):
 		offset >>= 1
 
 		for j in range(0, i):
-			tmp = leaves[(offset*(2*j + 2) - offset)]
-			leaves[(offset*(2*j + 2) - offset)] = leaves[(offset*(2*j + 1) - offset)]
-			leaves[(offset*(2*j + 1) - offset)] = leaves[(offset*(2*j + 1) - offset)] * tmp
+			tmp = leavesOut[(offset*(2*j + 2) - offset)]
+			leavesOut[(offset*(2*j + 2) - offset)] = leavesOut[(offset*(2*j + 1) - offset)]
+			leavesOut[(offset*(2*j + 1) - offset)] = leavesOut[(offset*(2*j + 1) - offset)] * tmp
 
 		i *= 2 
 
-	return leaves
+	return leavesOut
 
 
 def parallelPrefProdMultiply( leaves, coeffs ):
@@ -58,9 +60,9 @@ def parallelPrefProdSum( leaves ):
 
 def checkPackage():
 	f = GF2n(3, 11)
-	assert [str(x) for x in expandVec(f(6), 4)] == ['6', '6', '6', '6']
-	assert [str(x) for x in parallelPrefProdReduce(f(6), 4)] == ['4', '6', '2', '6']
-	assert [str(x) for x in parallelPrefProdDownSweep(parallelPrefProdReduce(f(6), 4))] == ['7', '2', '6', '1']
+	assert [str(x) for x in parallelExpandVec(f(6), 4)] == ['6', '6', '6', '6']
+	assert [str(x) for x in parallelPrefProdReduce(parallelExpandVec(f(6), 4))] == ['4', '6', '2', '6']
+	assert [str(x) for x in parallelPrefProdDownSweep(parallelPrefProdReduce(parallelExpandVec(f(6), 4)))] == ['7', '2', '6', '1']
 	assert str(parallelPrefProdSum([f(4), f(3)])) == '7'
 
 
