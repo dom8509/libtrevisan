@@ -28,6 +28,7 @@ public:
 
 private:
 	CUDA_CALLABLE_MEMBER void loadPoroperties();
+	void initBarrier(sfixn num_blocks);
 
 private:
 	sfixn* m_dx;
@@ -38,6 +39,8 @@ private:
 	sfixn* m_dTmp2;
 	sfixn* m_dTmp_long;
 	sfixn* m_dTmp_Result;
+
+	sfixn* m_dbarrier;
 
 	sfixn m_num_x;
 	sfixn m_size_field;
@@ -77,6 +80,7 @@ __global__ void cudaSet0Kernel(sfixn* x, sfixn length);
 __global__ void cudaSet1Kernel(sfixn* x, sfixn length);
 __global__ void cudaBitAddBNKernel(sfixn* a, sfixn* b, sfixn num_chunks);
 __global__ void cudaPrintbincharpadKernel(sfixn* ca, unsigned int n);
+__global__ void cudainitBarriersKernel(sfixn* barriers, sfixn num_barriers, sfixn num_blocks);
 
 /*
 	Device Functions

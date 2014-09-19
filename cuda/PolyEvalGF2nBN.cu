@@ -101,6 +101,7 @@ CUDA_CALLABLE_MEMBER GF2nPolyBN::GF2nPolyBN(
 	CudaSafeCall(cudaMalloc((sfixn**)&m_dTmp2, m_width_binary_tree / 2 * m_bytes_for_chunks));
 	CudaSafeCall(cudaMalloc((sfixn**)&m_dTmp_long, m_width_binary_tree * m_bytes_for_chunks));
 	CudaSafeCall(cudaMalloc((sfixn**)&m_dTmp_Result, m_width_binary_tree * m_bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&m_dbarrier, m_width_binary_tree * m_bytes_for_chunks));
 
 	sfixn hCoeffs[m_width_binary_tree * m_bytes_for_chunks];
 	padWithZeros(coeffs, m_num_coeffs, m_num_chunks, hCoeffs, m_width_binary_tree);
@@ -126,6 +127,7 @@ CUDA_CALLABLE_MEMBER GF2nPolyBN::~GF2nPolyBN() {
 	CudaSafeCall(cudaFree(m_dTmp2));
 	CudaSafeCall(cudaFree(m_dTmp_long));
 	CudaSafeCall(cudaFree(m_dTmp_Result));
+	CudaSafeCall(cudaFree(m_dbarrier));
 
 	delete m_hTmp_Result;
 
@@ -163,7 +165,9 @@ CUDA_CALLABLE_MEMBER void GF2nPolyBN::evaluate(sfixn i) {
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	num_threads = min(m_num_chunks*m_width_binary_tree, m_hMaxThreadsPerBlock);
 	num_blocks = ceil((double)m_num_chunks*m_width_binary_tree/m_hMaxThreadsPerBlock);
+#ifdef CUDA_SANITY_CHECKS
 	printf("Starting expand step...\n");
+#endif
 	cudaExpandVecBNKernel<<<num_blocks, num_threads>>>(&m_dx[i * m_num_chunks], m_num_chunks, m_dTmp_Result, m_num_chunks*m_width_binary_tree);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
@@ -179,7 +183,9 @@ CUDA_CALLABLE_MEMBER void GF2nPolyBN::evaluate(sfixn i) {
 	num_threads = min(m_width_binary_tree/2, m_hMaxThreadsPerBlock);
 	num_blocks = ceil((double)m_width_binary_tree/2/m_hMaxThreadsPerBlock);
 	// Calculate reduce step
+#ifdef CUDA_SANITY_CHECKS
 	printf("Starting reduce step...\n");
+#endif
 	cudaPrefProdReduce<<<num_blocks, num_threads>>>(m_num_chunks, m_dIrred_poly, m_dMask, m_width_binary_tree, m_dTmp1, m_dTmp_Result);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
@@ -192,7 +198,9 @@ CUDA_CALLABLE_MEMBER void GF2nPolyBN::evaluate(sfixn i) {
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// calculate down sweep step
+#ifdef CUDA_SANITY_CHECKS
 	printf("Starting down swep step...\n");
+#endif
 	cudaPrefProdDownSweep<<<num_blocks, num_threads>>>(m_num_chunks, m_dIrred_poly, m_dMask, m_width_binary_tree, m_dTmp1, m_dTmp2, m_dTmp_Result);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
@@ -208,8 +216,9 @@ CUDA_CALLABLE_MEMBER void GF2nPolyBN::evaluate(sfixn i) {
 	// (coeff[0]*x^0, ..., coeff[deg_poly]*x^deg_poly) and store it in res
 	num_threads = min(m_width_binary_tree, m_hMaxThreadsPerBlock);
 	num_blocks = ceil((double)m_width_binary_tree/m_hMaxThreadsPerBlock);
-
+#ifdef CUDA_SANITY_CHECKS
 	printf("Starting prod step...\n");
+#endif
 	cudaMontgMulBNKernel<<<num_blocks, num_threads>>>(m_dCoeffs, m_dTmp_Result, m_width_binary_tree, m_num_chunks, m_dIrred_poly, m_dMask, m_dTmp_long, m_dTmp_Result);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
@@ -222,8 +231,9 @@ CUDA_CALLABLE_MEMBER void GF2nPolyBN::evaluate(sfixn i) {
 	// Add all summands of the polynom up to the result
 	num_threads = min(m_width_binary_tree/2, m_hMaxThreadsPerBlock);
 	num_blocks = ceil((double)m_width_binary_tree/2/m_hMaxThreadsPerBlock);
-
+#ifdef CUDA_SANITY_CHECKS
 	printf("Starting sum step...\n");
+#endif
 	cudaBitSumBNKernel<<<num_blocks, num_threads>>>(m_dTmp_Result, m_num_chunks, m_width_binary_tree);
 	cudaDeviceSynchronize();
 
@@ -263,6 +273,12 @@ CUDA_CALLABLE_MEMBER void GF2nPolyBN::loadPoroperties() {
 
 	m_hMaxThreadsPerBlock = deviceProp.maxThreadsPerBlock;
 	m_hSharedMemPerBlock = deviceProp.sharedMemPerBlock;
+}
+
+void GF2nPolyBN::initBarrier(sfixn num_blocks) {
+
+
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -345,6 +361,7 @@ __global__ void cudaPrefProdReduce(
 	    int i = 0;
 
 	 	for( sfixn d=length_exp_tree>>1; d>0; d>>=1 ) { //build sum in place up the tree 
+	 		//if(thid == 0) printf("current i = %i\n", i);
 	 		__syncthreads();
 
 	 		if( thid < d ) {
@@ -678,12 +695,28 @@ __global__ void cudaSet1Kernel( sfixn* x, sfixn length ) {
 //	Adds a and b and stores the result in a
 //
 ////////////////////////////////////////////////////////////////////////////////
-__global__ void cudaBitAddBNKernel(sfixn* a, sfixn* b, sfixn num_chunks) {
+__global__ void cudaBitAddBNKernel(sfixn* a, sfixn* b, sfixn num_barriers, sfixn num_chunks) {
 
 	sfixn thid = (blockIdx.x * blockDim.x) + threadIdx.x;
 
 	if( thid < num_chunks )
 		a[thid] ^= b[thid];
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//
+//	Sets num_blocks of the barriers array to 1 and the rest to 0, starting left
+//
+////////////////////////////////////////////////////////////////////////////////
+__global__ void cudainitBarriersKernel(sfixn* barriers, sfixn num_blocks) {
+
+	sfixn thid = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+	if( thid < num_blocks )
+		barriers[thid] = 1;
+	else
+		barriers[thid] = 0;
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
