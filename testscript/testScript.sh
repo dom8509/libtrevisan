@@ -33,6 +33,9 @@ mkdir tmp 2>/dev/null
 rm tmp/* 2>/dev/null
 
 
+M=$((2**8))
+N=$((2**12))
+
 ######################################################
 #invoke rsh extractor
 let breakout=1
@@ -42,7 +45,7 @@ trap "let breakout=0" USR1
 export this_pid=$$
 
 text="Invoking RSH Extractor... "
-../extractor -n 1000000 -m 5000 -x rsh --extRand-file tmp/rsh 1>/dev/null 2>&1 && kill -USR1 $this_pid 2>/dev/null &
+../extractor -n $N -m $M -w gfp -x rsh --extRand-file tmp/rsh 1>/dev/null 2>&1 && kill -USR1 $this_pid 2>/dev/null &
 
 while [[ $breakout -eq 1 ]]
 do 
@@ -62,7 +65,7 @@ trap "let breakout=0" USR1
 export this_pid=$$
 
 text="Invoking RSH_CUDA Extractor... "
-../extractor -n 1000000 -m 5000 -x rsh_cuda --extRand-file tmp/rsh_cuda 1>/dev/null 2>&1 && kill -USR1 $this_pid 2>/dev/null &
+../extractor -n $N -m $M -w gfp -x rsh_cuda --extRand-file tmp/rsh_cuda 1>/dev/null 2>&1 && kill -USR1 $this_pid 2>/dev/null &
 
 while [[ $breakout -eq 1 ]]
 do 
@@ -84,6 +87,10 @@ md5rsh_cuda=($(md5sum tmp/rsh_cuda))
 
 if [ $md5rsh != $md5rsh_cuda ]; then
 	echo -e "\e[00;31mmd5 mismatch!\e[00m"
+	echo hexdump tmp/rsh
+	hexdump tmp/rsh
+	echo hexdump tmp/rsh_cuda
+	hexdump tmp/rsh_cuda
 else
 	echo -e "\e[00;31mRED\e[00m"
 fi

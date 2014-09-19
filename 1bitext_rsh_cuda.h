@@ -50,11 +50,18 @@ public:
 	// implemented
 	vertex_t num_random_bits();
 	bool extract(void *initial_rand);
+	bool cudaExtract(int i, std::vector<std::vector<unsigned int> > initial_rand_all, int *extracted_rand);
 	uint64_t compute_k() override;
 	
+	// special functions for transferring data to and from gpu
+	void prepare(int m, std::vector<std::vector<unsigned int> > initial_rand_all);
+	void followUp();
+
 private:
 	void create_coefficients();
 	void compute_r_l();
+
+	GF2nPolyBN* cuda;
 
 	uint64_t r;      // Order of polynomial, see the paper for details
 	uint64_t l;      // Seed length parameter, see the paper for details
@@ -69,6 +76,9 @@ private:
 
 	chunk_t* coeffs;
 	sfixn* irred_poly; // The irrep is either a trinomial or pentanomial
+
+	std::vector<std::vector<chunk_t> > x_all;
+	std::vector<std::vector<chunk_t> > rs_res_all;
 };
 
 #endif
