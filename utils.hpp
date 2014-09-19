@@ -124,13 +124,13 @@ void printbin(T* ca, unsigned int num_chunks, unsigned int num_values)
 }
 
 template<class T>
-void printbinToFile(T* ca, unsigned int num_chunks, unsigned int num_values, std::ofstream& file)
+void printbinToFile(T* ca, unsigned int num_chunks, unsigned int num_values, std::ofstream *file)
 {
 	for(int k=0; k<num_values; k++) {
 		for(int j=0; j<num_chunks; j++) {
-			file << std::bitset<sizeof(T)*8>(ca[(k*num_chunks) + j]);
+			(*file) << std::bitset<sizeof(T)*8>(ca[(k*num_chunks) + j]);
 		}
-		file << " ";
+		(*file) << " ";
 	}
 }
 

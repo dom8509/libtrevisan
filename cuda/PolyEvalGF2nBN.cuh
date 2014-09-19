@@ -3,17 +3,63 @@
 
 #include "CudaTypes.h"
 
+#ifdef CUDA_SANITY_CHECKS
+#include <iostream>
+#include <fstream>
+#endif
+
+#ifdef INCLUDE_FROM_CUDA_FILE
+#define CUDA_CALLABLE_MEMBER __host__
+#else
+#define CUDA_CALLABLE_MEMBER
+#endif
+
 /*
 	Public Functions
 */
-void evaluateGF2nPolyBN(sfixn* coeffs, sfixn* x, sfixn size_field, sfixn deg_poly, sfixn* irred_poly, sfixn* mask, sfixn* result);
+class GF2nPolyBN 
+{
+public:
+	CUDA_CALLABLE_MEMBER GF2nPolyBN(sfixn* coeffs, sfixn* x, sfixn num_x, sfixn size_field, sfixn deg_poly, sfixn* irred_poly, sfixn* mask);
+	CUDA_CALLABLE_MEMBER ~GF2nPolyBN();
 
+	CUDA_CALLABLE_MEMBER void evaluate(sfixn i);
+	CUDA_CALLABLE_MEMBER void getResults(sfixn *result);
+
+private:
+	CUDA_CALLABLE_MEMBER void loadPoroperties();
+
+private:
+	sfixn* m_dx;
+	sfixn* m_dCoeffs;
+	sfixn* m_dIrred_poly;
+	sfixn* m_dMask;
+	sfixn* m_dTmp1;
+	sfixn* m_dTmp2;
+	sfixn* m_dTmp_long;
+	sfixn* m_dTmp_Result;
+
+	sfixn m_num_x;
+	sfixn m_size_field;
+	sfixn m_num_coeffs;
+	sfixn m_num_chunks;
+	sfixn m_width_binary_tree;
+	sfixn m_bytes_for_chunks;
+
+	sfixn m_hMaxThreadsPerBlock;
+	sfixn m_hSharedMemPerBlock;
+
+	sfixn* m_hTmp_Result;
+
+#ifdef CUDA_SANITY_CHECKS
+	std::ofstream *m_result_file;
+#endif
+};
 
 #ifdef INCLUDE_FROM_CUDA_FILE
 /*
 	Host Functions
 */
-__host__ void loadPoroperties();
 __host__ sfixn getCeilToPotOf2n(sfixn value);
 __host__ void padWithZeros(sfixn* data_old, sfixn size_old, sfixn num_chunks, sfixn* data_new, sfixn size_new);
 __host__ sfixn getNumberBlocksForSharedMem(sfixn sharedMemSize );

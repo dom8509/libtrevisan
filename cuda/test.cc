@@ -1,40 +1,59 @@
-#include "../prng.hpp"
-#include "../utils.hpp"
 #include "PolyEvalGF2nBN.cuh"
+#include "../utils.hpp"
 #include <cstdlib>
 #include <vector>
 #include <cmath>
 #include <iostream>
-#include <cstdio>
 
-void set_irrep_cuda(sfixn*, unsigned);
+void get_rsh_test_parameters(sfixn& field_size, sfixn& num_coeffs, std::vector<sfixn>& coeffs, std::vector<sfixn>& x, std::vector<sfixn>& irred_poly, std::vector<sfixn>& mask); 
+
+template <typename T>
+T getNumberChunks( T length ) {
+	if( !length )
+		return 0;
+	else
+		return (length-1)/(sizeof(T)*8)+1;
+}
 
 int main(int argc, char** argv) {
 
-	sfixn field_size = 1023;
-	sfixn num_coeffs = 1000;
-
+	sfixn field_size;
+	sfixn num_coeffs;
 	std::vector<sfixn> coeffs;
-	create_randomness<sfixn>(num_coeffs*(field_size+1)/32, coeffs);
-	
 	std::vector<sfixn> x;
-	create_randomness<sfixn>((field_size+1)/32, x);
+	std::vector<sfixn> irrep_poly;
+	std::vector<sfixn> mask;
+
+	get_rsh_test_parameters(field_size, num_coeffs, coeffs, x, irrep_poly, mask);
+
+	sfixn numberChunks = getNumberChunks(field_size + 1);
+
+	std::vector<sfixn> result(numberChunks);
+
+	if(false) {
+		std::cout << "field_size: " << field_size << std::endl;
+		std::cout << "num_coeffs: " << num_coeffs << std::endl;
+
+		std::cout << "Coeffs: " << std::endl;
+		printbin<sfixn>(&coeffs[0], numberChunks, num_coeffs);
+		std::cout << "x: " << std::endl;
+		printbin<sfixn>(&x[0], numberChunks, 1);
+		std::cout << "irrep_poly: " << std::endl;
+		printbin<sfixn>(&irrep_poly[0], numberChunks, 1);
+		std::cout << "mask: " << std::endl;
+		printbin<sfixn>(&mask[0], numberChunks, 1);
+		std::cout << "Result before calling evaluateGF2nPolyBN:" << std::endl;
+		printbin<sfixn>(&result[0], numberChunks, 1);
+	}
 	
-	std::vector<sfixn> irrep_poly((field_size+1)/32);
-	set_irrep_cuda(&irrep_poly[0], field_size);
+	GF2nPolyBN poly(&coeffs[0], &x[0], 1, field_size, num_coeffs-1, &irrep_poly[0], &mask[0]);
+	poly.evaluate(0);
+	poly.getResults(&result[0]);
 
-	std::vector<sfixn> mask((field_size+1)/32);
-	mask[0] = pow(2, 32-1);
-
-	std::vector<sfixn> result((field_size+1)/32);
-
-	std::cout << "Result before calling evaluateGF2nPolyBN:" << std::endl;
-	printbincharpad<sfixn>(&result[0], (field_size+1)/32);
-	
-	evaluateGF2nPolyBN(&coeffs[0], &x[0], field_size, num_coeffs, &irrep_poly[0], &mask[0], &result[0]);
-
-	std::cout << "Result after calling evaluateGF2nPolyBN:" << std::endl;
-	printbincharpad<sfixn>(&result[0], (field_size+1)/32);
+	if(false) {
+		std::cout << "Result after calling evaluateGF2nPolyBN:" << std::endl;
+		printbin<sfixn>(&result[0], numberChunks, 1);
+	}
 	
 	return 0;
 }

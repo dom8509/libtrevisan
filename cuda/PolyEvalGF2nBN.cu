@@ -3,8 +3,6 @@
 #undef INCLUDE_FROM_CUDA_FILE
 
 #ifdef CUDA_SANITY_CHECKS
-#include <iostream>
-#include <fstream>
 #include "../utils.hpp"
 #endif
 
@@ -19,11 +17,6 @@
 __constant__ sfixn dMaxThreadsPerBlock;
 __constant__ sfixn dSharedMemPerBlock;
 
-// Host side
-static sfixn hMaxThreadsPerBlock;
-static sfixn hSharedMemPerBlock;
-
-
 __global__ void testMontgMult(sfixn* a, sfixn* b, sfixn num_chunks,sfixn* irred_poly, sfixn* mask,sfixn* tmp,sfixn* res) {
 
 	cudaMontgMulBN(a, b, num_chunks, irred_poly, mask, tmp, res);
@@ -35,11 +28,115 @@ __global__ void testShift(sfixn* x, sfixn num_chunks) {
 	cudaBitShiftLeft1BN(x, num_chunks);
 }
 
+
+sfixn *dx, *dCoeffs, *dIrred_poly, *dMask, *dTmp1, *dTmp2, *dTmp_long, *dTmp_Result;
+
 ////////////////////////////////////////////////////////////////////////////////
 /*
 	Host Functions
 */
 ////////////////////////////////////////////////////////////////////////////////
+
+CUDA_CALLABLE_MEMBER GF2nPolyBN::GF2nPolyBN(
+	sfixn* coeffs, 
+	sfixn* x,
+	sfixn num_x,
+	sfixn size_field,
+	sfixn deg_poly, 
+	sfixn* irred_poly,
+	sfixn* mask ) {
+
+	m_num_x = num_x;
+	m_size_field = size_field;
+
+	// How many coefficients does our polynomial have
+	m_num_coeffs = deg_poly + 1;
+
+	// Calculate the number of chunks of the data elements
+	m_num_chunks = getNumberChunks(m_size_field + 1);
+
+	// Calcualte the amount of leaves needed for used binary tree method
+	m_width_binary_tree = getCeilToPotOf2n(m_num_coeffs);
+
+	// How many bytes do we need for one field element
+	m_bytes_for_chunks = m_num_chunks * SIZE_CHUNK / SIZE_BYTE;
+
+#ifdef CUDA_SANITY_CHECKS
+	std::cout << "Creating Result file..." << std::endl;
+
+	remove("rsh_test_results");
+
+	m_result_file = new std::ofstream();
+	m_result_file->open("rsh_test_results");
+
+	// write input parameters
+	(*m_result_file) << "field_size=";
+	printbinToFile(&m_size_field, 1, 1, m_result_file);
+	(*m_result_file) << "\n";
+	(*m_result_file) << "num_coeffs=";
+	printbinToFile(&m_num_coeffs, 1, 1, m_result_file);
+	(*m_result_file) << "\n";
+	(*m_result_file) << "coeffs=";
+	printbinToFile(coeffs, m_num_chunks, m_num_coeffs, m_result_file);
+	(*m_result_file) << "\n";
+	(*m_result_file) << "x=";
+	printbinToFile(x, m_num_chunks, 1, m_result_file);
+	(*m_result_file) << "\n";
+	(*m_result_file) << "irred_poly=";
+	printbinToFile(irred_poly, m_num_chunks, 1, m_result_file);
+	(*m_result_file) << "\n";
+	(*m_result_file) << "mask=";
+	printbinToFile(mask, m_num_chunks, 1, m_result_file);
+	(*m_result_file) << "\n";
+#endif
+
+	loadPoroperties();
+
+	// Allocate global memory
+	CudaSafeCall(cudaMalloc((sfixn**)&m_dx, m_num_x * m_bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&m_dCoeffs, m_width_binary_tree * m_bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&m_dIrred_poly, m_bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&m_dMask, m_bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&m_dTmp1, m_width_binary_tree / 2 * m_bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&m_dTmp2, m_width_binary_tree / 2 * m_bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&m_dTmp_long, m_width_binary_tree * m_bytes_for_chunks));
+	CudaSafeCall(cudaMalloc((sfixn**)&m_dTmp_Result, m_width_binary_tree * m_bytes_for_chunks));
+
+	sfixn hCoeffs[m_width_binary_tree * m_bytes_for_chunks];
+	padWithZeros(coeffs, m_num_coeffs, m_num_chunks, hCoeffs, m_width_binary_tree);
+
+	// Copy host data to device
+	CudaSafeCall(cudaMemcpy(m_dx, x, m_num_x * m_bytes_for_chunks, cudaMemcpyHostToDevice));
+	CudaSafeCall(cudaMemcpy(m_dCoeffs, hCoeffs, m_width_binary_tree * m_bytes_for_chunks, cudaMemcpyHostToDevice));
+	CudaSafeCall(cudaMemcpy(m_dIrred_poly, irred_poly, m_bytes_for_chunks, cudaMemcpyHostToDevice));
+	CudaSafeCall(cudaMemcpy(m_dMask, mask, m_bytes_for_chunks, cudaMemcpyHostToDevice));
+
+	m_hTmp_Result = new sfixn[m_width_binary_tree * m_bytes_for_chunks];
+
+}
+
+CUDA_CALLABLE_MEMBER GF2nPolyBN::~GF2nPolyBN() {
+
+	// Free all allocated device memory
+	CudaSafeCall(cudaFree(m_dx));
+	CudaSafeCall(cudaFree(m_dCoeffs));
+	CudaSafeCall(cudaFree(m_dIrred_poly));
+	CudaSafeCall(cudaFree(m_dMask));
+	CudaSafeCall(cudaFree(m_dTmp1));
+	CudaSafeCall(cudaFree(m_dTmp2));
+	CudaSafeCall(cudaFree(m_dTmp_long));
+	CudaSafeCall(cudaFree(m_dTmp_Result));
+
+	delete m_hTmp_Result;
+
+#ifdef CUDA_SANITY_CHECKS
+	std::cout << "finished" << std::endl;
+	m_result_file->close();
+	delete m_result_file;
+#endif
+
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 //	A polynomial evaluation over GF(2n) with BN Coefficients
@@ -58,179 +155,97 @@ __global__ void testShift(sfixn* x, sfixn num_chunks) {
 //		result			- the result 								-> size = n + 1
 //
 ////////////////////////////////////////////////////////////////////////////////
-void evaluateGF2nPolyBN(
-	sfixn* coeffs, 
-	sfixn* x, 
-	sfixn size_field,
-	sfixn deg_poly, 
-	sfixn* irred_poly,
-	sfixn* mask,
-	sfixn* result ) {
-
-	// How many coefficients does our polynomial have
-	sfixn count_coeffs = deg_poly + 1;
-
-	// Calculate the number of chunks of the data elements
-	sfixn num_chunks = getNumberChunks(size_field + 1);
-
-	// Calcualte the amount of leaves needed for used binary tree method
-	sfixn width_binary_tree = getCeilToPotOf2n(count_coeffs);
-
-	// How many bytes do we need for one field element
-	sfixn bytes_for_chunks = num_chunks * SIZE_CHUNK / SIZE_BYTE;
-
-#ifdef CUDA_SANITY_CHECKS
-	std::cout << "Creating Result file...";
-
-	remove("rsh_test_results");
-
-	std::ofstream result_file;
-	result_file.open("rsh_test_results");
-
-	// write input parameters
-	result_file << "field_size=";
-	printbinToFile(&size_field, 1, 1, result_file);
-	result_file << "\n";
-	result_file << "num_coeffs=";
-	printbinToFile(&count_coeffs, 1, 1, result_file);
-	result_file << "\n";
-	result_file << "coeffs=";
-	printbinToFile(coeffs, num_chunks, count_coeffs, result_file);
-	result_file << "\n";
-	result_file << "x=";
-	printbinToFile(x, num_chunks, 1, result_file);
-	result_file << "\n";
-	result_file << "irred_poly=";
-	printbinToFile(irred_poly, num_chunks, 1, result_file);
-	result_file << "\n";
-	result_file << "mask=";
-	printbinToFile(mask, num_chunks, 1, result_file);
-	result_file << "\n";
-#endif
-
-	// Lead device properties to constant memory
-	loadPoroperties();
-
-	// Define all device variables
-	sfixn *dx, *dCoeffs, *dIrred_poly, *dMask, *dTmp1, *dTmp2, *dTmp_long, *dTmp_Result;
-	
-	// Allocate the device variables
-	CudaSafeCall(cudaMalloc((sfixn**)&dx, bytes_for_chunks));
-	CudaSafeCall(cudaMalloc((sfixn**)&dCoeffs, width_binary_tree * bytes_for_chunks));
-	CudaSafeCall(cudaMalloc((sfixn**)&dIrred_poly, bytes_for_chunks));
-	CudaSafeCall(cudaMalloc((sfixn**)&dMask, bytes_for_chunks));
-	CudaSafeCall(cudaMalloc((sfixn**)&dTmp1, width_binary_tree / 2 * bytes_for_chunks));
-	CudaSafeCall(cudaMalloc((sfixn**)&dTmp2, width_binary_tree / 2 * bytes_for_chunks));
-	CudaSafeCall(cudaMalloc((sfixn**)&dTmp_long, width_binary_tree * bytes_for_chunks));
-	CudaSafeCall(cudaMalloc((sfixn**)&dTmp_Result, width_binary_tree * bytes_for_chunks));
-
-	sfixn hCoeffs[width_binary_tree * bytes_for_chunks];
-	padWithZeros(coeffs, count_coeffs, num_chunks, hCoeffs, width_binary_tree);
-	sfixn hTmp_Result[width_binary_tree * bytes_for_chunks];
-
-	// Copy host data to device
-	CudaSafeCall(cudaMemcpy(dx, x, bytes_for_chunks, cudaMemcpyHostToDevice));
-	CudaSafeCall(cudaMemcpy(dCoeffs, hCoeffs, width_binary_tree * bytes_for_chunks, cudaMemcpyHostToDevice));
-	CudaSafeCall(cudaMemcpy(dIrred_poly, irred_poly, bytes_for_chunks, cudaMemcpyHostToDevice));
-	CudaSafeCall(cudaMemcpy(dMask, mask, bytes_for_chunks, cudaMemcpyHostToDevice));
+CUDA_CALLABLE_MEMBER void GF2nPolyBN::evaluate(sfixn i) {
 
 	sfixn num_threads, num_blocks;
 
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
-	num_threads = min(num_chunks*width_binary_tree, hMaxThreadsPerBlock);
-	num_blocks = ceil((double)num_chunks*width_binary_tree/hMaxThreadsPerBlock);
-	//printf("Starting expand step...\n");
-	cudaExpandVecBNKernel<<<num_blocks, num_threads>>>(dx, num_chunks, dTmp_Result, num_chunks*width_binary_tree);
+	num_threads = min(m_num_chunks*m_width_binary_tree, m_hMaxThreadsPerBlock);
+	num_blocks = ceil((double)m_num_chunks*m_width_binary_tree/m_hMaxThreadsPerBlock);
+	printf("Starting expand step...\n");
+	cudaExpandVecBNKernel<<<num_blocks, num_threads>>>(&m_dx[i * m_num_chunks], m_num_chunks, m_dTmp_Result, m_num_chunks*m_width_binary_tree);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
-	CudaSafeCall(cudaMemcpy(hTmp_Result, dTmp_Result, width_binary_tree * bytes_for_chunks, cudaMemcpyDeviceToHost));
-	result_file << "resultExpandStep=";
-	printbinToFile(hTmp_Result, num_chunks, width_binary_tree, result_file);
-	result_file << "\n";
+	CudaSafeCall(cudaMemcpy(m_hTmp_Result, m_dTmp_Result, m_width_binary_tree * m_bytes_for_chunks, cudaMemcpyDeviceToHost));
+	(*m_result_file) << "resultExpandStep=";
+	printbinToFile(m_hTmp_Result, m_num_chunks, m_width_binary_tree, m_result_file);
+	(*m_result_file) << "\n";
 #endif
 
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Create all exponentiation from x^0 to x^deg_poly and store it in res 
-	num_threads = min(width_binary_tree/2, hMaxThreadsPerBlock);
-	num_blocks = ceil((double)width_binary_tree/2/hMaxThreadsPerBlock);
+	num_threads = min(m_width_binary_tree/2, m_hMaxThreadsPerBlock);
+	num_blocks = ceil((double)m_width_binary_tree/2/m_hMaxThreadsPerBlock);
 	// Calculate reduce step
-	//printf("Starting reduce step...\n");
-	cudaPrefProdReduce<<<num_blocks, num_threads>>>(num_chunks, dIrred_poly, dMask, width_binary_tree, dTmp1, dTmp_Result);
+	printf("Starting reduce step...\n");
+	cudaPrefProdReduce<<<num_blocks, num_threads>>>(m_num_chunks, m_dIrred_poly, m_dMask, m_width_binary_tree, m_dTmp1, m_dTmp_Result);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
-	CudaSafeCall(cudaMemcpy(hTmp_Result, dTmp_Result, width_binary_tree * bytes_for_chunks, cudaMemcpyDeviceToHost));
-	result_file << "resultReduceStep=";
-	printbinToFile(hTmp_Result, num_chunks, width_binary_tree, result_file);
-	result_file << "\n";
+	CudaSafeCall(cudaMemcpy(m_hTmp_Result, m_dTmp_Result, m_width_binary_tree * m_bytes_for_chunks, cudaMemcpyDeviceToHost));
+	(*m_result_file) << "resultReduceStep=";
+	printbinToFile(m_hTmp_Result, m_num_chunks, m_width_binary_tree, m_result_file);
+	(*m_result_file) << "\n";
 #endif
 
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// calculate down sweep step
-	//printf("Starting down swep step...\n");
-	cudaPrefProdDownSweep<<<num_blocks, num_threads>>>(num_chunks, dIrred_poly, dMask, width_binary_tree, dTmp1, dTmp2, dTmp_Result);
+	printf("Starting down swep step...\n");
+	cudaPrefProdDownSweep<<<num_blocks, num_threads>>>(m_num_chunks, m_dIrred_poly, m_dMask, m_width_binary_tree, m_dTmp1, m_dTmp2, m_dTmp_Result);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
-	CudaSafeCall(cudaMemcpy(hTmp_Result, dTmp_Result, width_binary_tree * bytes_for_chunks, cudaMemcpyDeviceToHost));
-	result_file << "resultDownSweepStep=";
-	printbinToFile(hTmp_Result, num_chunks, width_binary_tree, result_file);
-	result_file << "\n";
+	CudaSafeCall(cudaMemcpy(m_hTmp_Result, m_dTmp_Result, m_width_binary_tree * m_bytes_for_chunks, cudaMemcpyDeviceToHost));
+	(*m_result_file) << "resultDownSweepStep=";
+	printbinToFile(m_hTmp_Result, m_num_chunks, m_width_binary_tree, m_result_file);
+	(*m_result_file) << "\n";
 #endif
 
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Multiply each coefficient with its related exponentiation of x 
 	// (coeff[0]*x^0, ..., coeff[deg_poly]*x^deg_poly) and store it in res
-	num_threads = min(width_binary_tree, hMaxThreadsPerBlock);
-	num_blocks = ceil((double)width_binary_tree/hMaxThreadsPerBlock);
+	num_threads = min(m_width_binary_tree, m_hMaxThreadsPerBlock);
+	num_blocks = ceil((double)m_width_binary_tree/m_hMaxThreadsPerBlock);
 
-	//printf("Starting prod step...\n");
-	cudaMontgMulBNKernel<<<num_blocks, num_threads>>>(dCoeffs, dTmp_Result, width_binary_tree, num_chunks, dIrred_poly, dMask, dTmp_long, dTmp_Result);
+	printf("Starting prod step...\n");
+	cudaMontgMulBNKernel<<<num_blocks, num_threads>>>(m_dCoeffs, m_dTmp_Result, m_width_binary_tree, m_num_chunks, m_dIrred_poly, m_dMask, m_dTmp_long, m_dTmp_Result);
 	cudaDeviceSynchronize();
 #ifdef CUDA_SANITY_CHECKS
-	CudaSafeCall(cudaMemcpy(hTmp_Result, dTmp_Result, width_binary_tree * bytes_for_chunks, cudaMemcpyDeviceToHost));
-	result_file << "resultProdStep=";
-	printbinToFile(hTmp_Result, num_chunks, width_binary_tree, result_file);
-	result_file << "\n";
+	CudaSafeCall(cudaMemcpy(m_hTmp_Result, m_dTmp_Result, m_width_binary_tree * m_bytes_for_chunks, cudaMemcpyDeviceToHost));
+	(*m_result_file) << "resultProdStep=";
+	printbinToFile(m_hTmp_Result, m_num_chunks, m_width_binary_tree, m_result_file);
+	(*m_result_file) << "\n";
 #endif
 
 	// Add all summands of the polynom up to the result
-	num_threads = min(width_binary_tree/2, hMaxThreadsPerBlock);
-	num_blocks = ceil((double)width_binary_tree/2/hMaxThreadsPerBlock);
+	num_threads = min(m_width_binary_tree/2, m_hMaxThreadsPerBlock);
+	num_blocks = ceil((double)m_width_binary_tree/2/m_hMaxThreadsPerBlock);
 
-	//printf("Starting sum step...\n");
-	cudaBitSumBNKernel<<<num_blocks, num_threads>>>(dTmp_Result, num_chunks, width_binary_tree);
+	printf("Starting sum step...\n");
+	cudaBitSumBNKernel<<<num_blocks, num_threads>>>(m_dTmp_Result, m_num_chunks, m_width_binary_tree);
 	cudaDeviceSynchronize();
 
-	// Read the result from device
-	CudaSafeCall(cudaMemcpy(hTmp_Result, dTmp_Result, width_binary_tree * bytes_for_chunks, cudaMemcpyDeviceToHost));
-
-	// Create result
-	for( sfixn i=0; i<num_chunks; ++i ) {
-		result[i] = hTmp_Result[i];
-	}
 #ifdef CUDA_SANITY_CHECKS
-	result_file << "resultSumStep=";
-	printbinToFile(result, num_chunks, 1, result_file);
-	result_file << "\n";
+	CudaSafeCall(cudaMemcpy(m_hTmp_Result, m_dTmp_Result, m_width_binary_tree * m_bytes_for_chunks, cudaMemcpyDeviceToHost));
+	(*m_result_file) << "resultSumStep=";
+	printbinToFile(m_hTmp_Result, m_num_chunks, 1, m_result_file);
+	(*m_result_file) << "\n";
 #endif	
 
-#ifdef CUDA_SANITY_CHECKS
-	std::cout << "finished" << std::endl;
-	result_file.close();
-#endif
+}
 
-	// Free all allocated device memory
-	CudaSafeCall(cudaFree(dx));
-	CudaSafeCall(cudaFree(dCoeffs));
-	CudaSafeCall(cudaFree(dIrred_poly));
-	CudaSafeCall(cudaFree(dMask));
-	CudaSafeCall(cudaFree(dTmp1));
-	CudaSafeCall(cudaFree(dTmp2));
-	CudaSafeCall(cudaFree(dTmp_long));
-	CudaSafeCall(cudaFree(dTmp_Result));
+CUDA_CALLABLE_MEMBER void GF2nPolyBN::getResults(sfixn *result) {
+
+	// Read the result from device
+	CudaSafeCall(cudaMemcpy(m_hTmp_Result, m_dTmp_Result, m_width_binary_tree * m_bytes_for_chunks, cudaMemcpyDeviceToHost));
+
+	// Create result
+	for( sfixn i=0; i<m_num_chunks; ++i ) {
+		result[i] = m_hTmp_Result[i];
+	}
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -238,7 +253,7 @@ void evaluateGF2nPolyBN(
 //	Load some cuda properties to constant memory
 //
 ////////////////////////////////////////////////////////////////////////////////
-__host__ void loadPoroperties() {
+CUDA_CALLABLE_MEMBER void GF2nPolyBN::loadPoroperties() {
 
 	cudaDeviceProp deviceProp;
 	cudaGetDeviceProperties(&deviceProp, 0);
@@ -246,8 +261,8 @@ __host__ void loadPoroperties() {
 	CudaSafeCall(cudaMemcpyToSymbol(dMaxThreadsPerBlock, (const char *)&deviceProp.maxThreadsPerBlock, sizeof(sfixn), 0, cudaMemcpyHostToDevice));
 	CudaSafeCall(cudaMemcpyToSymbol(dSharedMemPerBlock, &deviceProp.sharedMemPerBlock, sizeof(sfixn)));
 
-	hMaxThreadsPerBlock = deviceProp.maxThreadsPerBlock;
-	hSharedMemPerBlock = deviceProp.sharedMemPerBlock;
+	m_hMaxThreadsPerBlock = deviceProp.maxThreadsPerBlock;
+	m_hSharedMemPerBlock = deviceProp.sharedMemPerBlock;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -561,7 +576,7 @@ __global__ void cudaMontgMulBNKernel(
 	// 	for(int i=0; i<num_values; ++i) {
 	// 		printf("x_preCalc[%i]: ", i); cudaPrintbincharpad(&x_preCalc[i], num_chunks);
 	// 	}
-	}
+	//}
 
 	cudaMontgMulBN(
 		&values[thid*num_chunks], 
